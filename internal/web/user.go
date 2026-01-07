@@ -8,11 +8,16 @@ import (
 )
 
 // UserHandler 处理用户相关的请求
+// 将预编译的正则表达式存储在结构体字段中，而不是在每次请求时编译
+// 好处：正则表达式只在 NewUserHandler() 时编译一次，后续所有请求都复用已编译的对象
+// 避免了每次请求都重新编译正则表达式的性能开销
 type UserHandler struct {
-	emailExp *regexp.Regexp
-	passwordExp *regexp.Regexp
+	emailExp    *regexp.Regexp // 预编译的邮箱格式正则表达式
+	passwordExp *regexp.Regexp // 预编译的密码格式正则表达式
 }
 
+// NewUserHandler 创建 UserHandler 实例
+// 在这里完成正则表达式的编译，确保只编译一次
 func NewUserHandler() *UserHandler {
 	const (
 		emailRegex    = `^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$`
@@ -52,7 +57,7 @@ func (u *UserHandler) Signup(c *gin.Context) {
 	if err := c.Bind(&req); err != nil { //Bind 方法会根据请求的 Content-Type 来解析你的数据到req里面
 		return
 	}
-	
+
 	ok, err := u.emailExp.MatchString(req.Email)
 	if err != nil {
 		c.String(http.StatusOK, "系统错误")
@@ -68,7 +73,6 @@ func (u *UserHandler) Signup(c *gin.Context) {
 		return
 	}
 
-	
 	ok, err = u.passwordExp.MatchString(req.Password)
 	if err != nil {
 		c.String(http.StatusOK, "系统错误")
