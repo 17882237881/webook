@@ -2,6 +2,8 @@ package web
 
 import (
 	"net/http"
+	"webook/internal/domain"
+	"webook/internal/service"
 
 	regexp "github.com/dlclark/regexp2"
 	"github.com/gin-gonic/gin"
@@ -12,18 +14,20 @@ import (
 // 好处：正则表达式只在 NewUserHandler() 时编译一次，后续所有请求都复用已编译的对象
 // 避免了每次请求都重新编译正则表达式的性能开销
 type UserHandler struct {
-	emailExp    *regexp.Regexp // 预编译的邮箱格式正则表达式
-	passwordExp *regexp.Regexp // 预编译的密码格式正则表达式
+	svc         *service.UserService // 业务逻辑层
+	emailExp    *regexp.Regexp       // 预编译的邮箱格式正则表达式
+	passwordExp *regexp.Regexp       // 预编译的密码格式正则表达式
 }
 
 // NewUserHandler 创建 UserHandler 实例
 // 在这里完成正则表达式的编译，确保只编译一次
-func NewUserHandler() *UserHandler {
+func NewUserHandler(svc *service.UserService) *UserHandler {
 	const (
 		emailRegex    = `^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$`
 		passwordRegex = `^.{6,16}$`
 	)
 	return &UserHandler{
+		svc:         svc,
 		emailExp:    regexp.MustCompile(emailRegex, regexp.None),
 		passwordExp: regexp.MustCompile(passwordRegex, regexp.None),
 	}
@@ -83,13 +87,41 @@ func (u *UserHandler) Signup(c *gin.Context) {
 		return
 	}
 
-	//省略数据库操作
+	err = u.svc.SignUp(c.Request.Context(), domain.User{
+		Email:    req.Email,
+		Password: req.Password,
+	})
+	if err != nil {
+		c.String(http.StatusOK, "注册失败")
+		return
+	}
 
 	c.String(http.StatusOK, "注册成功")
 }
 
 func (u *UserHandler) Login(c *gin.Context) {
+	type LoginReq struct {
+		Email    string `json:"email"`
+		Password string `json:"password"`
+	}
 
+	var req LoginReq
+	if err := c.Bind(&req); err != nil {
+		return
+	}
+
+	user, err := u.svc.Login(c.Request.Context(), req.Email, req.Password)
+	if err == service.ErrInvalidUserOrPassword {
+		c.String(http.StatusOK, "邮箱或密码不正确")
+		return
+	}
+	if err != nil {
+		c.String(http.StatusOK, "系统错误")
+		return
+	}
+
+	c.String(http.StatusOK, "登录成功")
+	_ = user // 后续可用于设置 session
 }
 
 func (u *UserHandler) Edit(c *gin.Context) {
