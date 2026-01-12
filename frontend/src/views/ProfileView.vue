@@ -93,6 +93,7 @@ async function handleUpdatePassword() {
 }
 
 function handleLogout() {
+  localStorage.removeItem('token')
   localStorage.removeItem('userId')
   router.push('/')
 }

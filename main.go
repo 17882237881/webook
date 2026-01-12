@@ -9,8 +9,6 @@ import (
 	"webook/internal/web/middleware"
 
 	"github.com/gin-contrib/cors"
-	"github.com/gin-contrib/sessions"
-	"github.com/gin-contrib/sessions/redis"
 	"github.com/gin-gonic/gin"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
@@ -23,20 +21,16 @@ func main() {
 	// 初始化数据库
 	db := initDB(cfg)
 
+	// 初始化 JWT
+	middleware.InitJWT(cfg.JWT.SecretKey)
+
 	// 依赖注入：DAO → Repository → Service → Handler
 	userDAO := dao.NewUserDAO(db)
 	userRepo := repository.NewUserRepository(userDAO)
 	userSvc := service.NewUserService(userRepo)
-	u := web.NewUserHandler(userSvc)
+	u := web.NewUserHandler(userSvc, cfg.JWT.ExpireTime)
 
 	server := gin.Default()
-
-	// Session 配置 - 使用 Redis 存储
-	store, err := redis.NewStore(16, "tcp", cfg.Redis.Addr, cfg.Redis.Password, cfg.Session.Secret)
-	if err != nil {
-		panic(err)
-	}
-	server.Use(sessions.Sessions(cfg.Session.Name, store))
 
 	// CORS 中间件配置
 	server.Use(cors.New(cors.Config{
@@ -51,8 +45,8 @@ func main() {
 		MaxAge: cfg.CORS.MaxAge,
 	}))
 
-	// 登录校验中间件 - RESTful 路径白名单
-	server.Use(middleware.NewLoginMiddlewareBuilder().
+	// JWT 登录校验中间件 - RESTful 路径白名单
+	server.Use(middleware.NewJWTMiddlewareBuilder().
 		IgnorePaths("/users", "/users/login"). // POST /users 注册, POST /users/login 登录
 		Build())
 

@@ -74,6 +74,8 @@ async function handleLogin() {
   try {
     const res = await login(loginForm.value.email, loginForm.value.password)
     if (res.code === 0) {
+      // 存储 JWT Token 和用户 ID
+      localStorage.setItem('token', res.data.token)
       localStorage.setItem('userId', res.data.userId)
       router.push('/profile')
     } else {

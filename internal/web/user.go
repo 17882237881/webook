@@ -3,32 +3,35 @@ package web
 import (
 	"net/http"
 	"strconv"
+	"time"
 	"webook/internal/domain"
 	"webook/internal/service"
+	"webook/internal/web/middleware"
 	"webook/pkg/ginx"
 
 	regexp "github.com/dlclark/regexp2"
-	"github.com/gin-contrib/sessions"
 	"github.com/gin-gonic/gin"
 )
 
 // UserHandler 处理用户相关的请求
 type UserHandler struct {
-	svc         service.UserService // 依赖接口
-	emailExp    *regexp.Regexp
-	passwordExp *regexp.Regexp
+	svc           service.UserService // 依赖接口
+	emailExp      *regexp.Regexp
+	passwordExp   *regexp.Regexp
+	jwtExpireTime time.Duration
 }
 
 // NewUserHandler 创建 UserHandler 实例
-func NewUserHandler(svc service.UserService) *UserHandler {
+func NewUserHandler(svc service.UserService, jwtExpireTime time.Duration) *UserHandler {
 	const (
 		emailRegex    = `^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$`
 		passwordRegex = `^.{6,16}$`
 	)
 	return &UserHandler{
-		svc:         svc,
-		emailExp:    regexp.MustCompile(emailRegex, regexp.None),
-		passwordExp: regexp.MustCompile(passwordRegex, regexp.None),
+		svc:           svc,
+		emailExp:      regexp.MustCompile(emailRegex, regexp.None),
+		passwordExp:   regexp.MustCompile(passwordRegex, regexp.None),
+		jwtExpireTime: jwtExpireTime,
 	}
 }
 
@@ -122,13 +125,16 @@ func (u *UserHandler) Login(c *gin.Context) {
 		return
 	}
 
-	// 登录成功，设置 session
-	sess := sessions.Default(c)
-	sess.Set("userId", user.Id)
-	sess.Save()
+	// 登录成功，生成 JWT Token
+	token, err := middleware.GenerateToken(user.Id, u.jwtExpireTime)
+	if err != nil {
+		ginx.Error(c, ginx.CodeInternalError, "生成Token失败")
+		return
+	}
 
 	ginx.Success(c, gin.H{
 		"userId": user.Id,
+		"token":  token,
 	})
 }
 

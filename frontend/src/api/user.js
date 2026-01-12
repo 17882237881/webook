@@ -1,14 +1,26 @@
 const BASE_URL = 'http://localhost:8080'
 
+// 获取存储的 Token
+function getToken() {
+    return localStorage.getItem('token')
+}
+
 // API 请求封装
 async function request(url, options = {}) {
+    const token = getToken()
+    const headers = {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+
+    // 如果有 Token，添加 Authorization 头
+    if (token) {
+        headers['Authorization'] = `Bearer ${token}`
+    }
+
     const response = await fetch(BASE_URL + url, {
         ...options,
-        credentials: 'include', // 携带 cookie
-        headers: {
-            'Content-Type': 'application/json',
-            ...options.headers
-        }
+        headers
     })
     return response.json()
 }

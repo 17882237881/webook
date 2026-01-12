@@ -10,6 +10,7 @@ type Config struct {
 	Server  ServerConfig
 	DB      DBConfig
 	Redis   RedisConfig
+	JWT     JWTConfig
 	Session SessionConfig
 	CORS    CORSConfig
 }
@@ -32,6 +33,11 @@ type RedisConfig struct {
 	Password string
 }
 
+type JWTConfig struct {
+	SecretKey  string
+	ExpireTime time.Duration
+}
+
 type CORSConfig struct {
 	AllowOrigins []string
 	MaxAge       time.Duration
@@ -49,6 +55,10 @@ func Load() *Config {
 		Redis: RedisConfig{
 			Addr:     getEnv("REDIS_ADDR", "localhost:6379"),
 			Password: getEnv("REDIS_PASSWORD", ""),
+		},
+		JWT: JWTConfig{
+			SecretKey:  getEnv("JWT_SECRET", "your-jwt-secret-key"),
+			ExpireTime: 30 * time.Minute,
 		},
 		Session: SessionConfig{
 			Secret: getEnv("SESSION_SECRET", "your-secret-key-change-in-production"),
