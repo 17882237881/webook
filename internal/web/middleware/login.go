@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"net/http"
+	"time"
 
 	"github.com/gin-contrib/sessions"
 	"github.com/gin-gonic/gin"
@@ -26,7 +27,7 @@ func (l *LoginMiddlewareBuilder) Build() gin.HandlerFunc {
 		// 检查当前路径是否在白名单中
 		for _, path := range l.paths {
 			if c.Request.URL.Path == path {
-				c.Next()
+				c.Next() // 白名单路径，直接放行（继续执行下一个中间件）
 				return
 			}
 		}
@@ -40,11 +41,25 @@ func (l *LoginMiddlewareBuilder) Build() gin.HandlerFunc {
 			return
 		}
 
+		// Session 续期逻辑（滑动过期）
+		// 如果距离上次更新超过 10 分钟，就刷新 Session
+		const refreshInterval = 10 * 60 * 1000 // 10分钟（毫秒）
+		now := time.Now().UnixMilli()
+		updateTime := sess.Get("updateTime")
+
+		if updateTime == nil || now-updateTime.(int64) > refreshInterval {
+			sess.Set("updateTime", now)
+			sess.Options(sessions.Options{
+				MaxAge: 30 * 60, // 续期30分钟
+			})
+			sess.Save()
+		}
+
 		// 将 userId 存入 Context，供后续 Handler 使用
 		// session 存储的是 int64，需要类型断言
 		c.Set("userId", userId.(int64))
 
-		// 已登录，继续处理请求
+		// 已登录，继续下一个中间件
 		c.Next()
 	}
 }

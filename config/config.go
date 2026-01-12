@@ -9,6 +9,7 @@ import (
 type Config struct {
 	Server  ServerConfig
 	DB      DBConfig
+	Redis   RedisConfig
 	Session SessionConfig
 	CORS    CORSConfig
 }
@@ -26,6 +27,11 @@ type SessionConfig struct {
 	Name   string
 }
 
+type RedisConfig struct {
+	Addr     string
+	Password string
+}
+
 type CORSConfig struct {
 	AllowOrigins []string
 	MaxAge       time.Duration
@@ -39,6 +45,10 @@ func Load() *Config {
 		},
 		DB: DBConfig{
 			DSN: getEnv("DB_DSN", "root:root@tcp(localhost:13316)/webook"),
+		},
+		Redis: RedisConfig{
+			Addr:     getEnv("REDIS_ADDR", "localhost:6379"),
+			Password: getEnv("REDIS_PASSWORD", ""),
 		},
 		Session: SessionConfig{
 			Secret: getEnv("SESSION_SECRET", "your-secret-key-change-in-production"),

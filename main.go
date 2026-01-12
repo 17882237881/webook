@@ -10,7 +10,7 @@ import (
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-contrib/sessions"
-	"github.com/gin-contrib/sessions/cookie"
+	"github.com/gin-contrib/sessions/redis"
 	"github.com/gin-gonic/gin"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
@@ -31,8 +31,11 @@ func main() {
 
 	server := gin.Default()
 
-	// Session 配置
-	store := cookie.NewStore([]byte(cfg.Session.Secret))
+	// Session 配置 - 使用 Redis 存储
+	store, err := redis.NewStore(16, "tcp", cfg.Redis.Addr, cfg.Redis.Password, cfg.Session.Secret)
+	if err != nil {
+		panic(err)
+	}
 	server.Use(sessions.Sessions(cfg.Session.Name, store))
 
 	// CORS 中间件配置
