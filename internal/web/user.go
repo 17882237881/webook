@@ -2,26 +2,25 @@ package web
 
 import (
 	"net/http"
+	"strconv"
 	"webook/internal/domain"
 	"webook/internal/service"
+	"webook/pkg/ginx"
 
 	regexp "github.com/dlclark/regexp2"
+	"github.com/gin-contrib/sessions"
 	"github.com/gin-gonic/gin"
 )
 
 // UserHandler 处理用户相关的请求
-// 将预编译的正则表达式存储在结构体字段中，而不是在每次请求时编译
-// 好处：正则表达式只在 NewUserHandler() 时编译一次，后续所有请求都复用已编译的对象
-// 避免了每次请求都重新编译正则表达式的性能开销
 type UserHandler struct {
-	svc         *service.UserService // 业务逻辑层
-	emailExp    *regexp.Regexp       // 预编译的邮箱格式正则表达式
-	passwordExp *regexp.Regexp       // 预编译的密码格式正则表达式
+	svc         service.UserService // 依赖接口
+	emailExp    *regexp.Regexp
+	passwordExp *regexp.Regexp
 }
 
 // NewUserHandler 创建 UserHandler 实例
-// 在这里完成正则表达式的编译，确保只编译一次
-func NewUserHandler(svc *service.UserService) *UserHandler {
+func NewUserHandler(svc service.UserService) *UserHandler {
 	const (
 		emailRegex    = `^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$`
 		passwordRegex = `^.{6,16}$`
@@ -34,56 +33,52 @@ func NewUserHandler(svc *service.UserService) *UserHandler {
 }
 
 func (u *UserHandler) RegisterRoutes(server *gin.Engine) {
-
 	ug := server.Group("/users")
 
-	// 用户注册
-	ug.POST("/signup", u.Signup)
-
-	// 用户登录
-	ug.POST("/login", u.Login)
-
-	// 用户编辑
-	ug.POST("/edit", u.Edit)
-
-	// 用户详情
-	ug.GET("/profile", u.Profile)
+	// RESTful API
+	ug.POST("", u.SignUp)                   // 创建用户（注册）
+	ug.POST("/login", u.Login)              // 登录（action 风格）
+	ug.GET("/:id", u.Profile)               // 获取用户信息
+	ug.PUT("/:id/password", u.EditPassword) // 修改密码
 }
 
-func (u *UserHandler) Signup(c *gin.Context) {
-	type SingUpReq struct {
+// SignUp 用户注册
+// POST /users
+func (u *UserHandler) SignUp(c *gin.Context) {
+	type SignUpReq struct {
 		Email           string `json:"email"`
 		ConfirmPassword string `json:"confirmPassword"`
 		Password        string `json:"password"`
 	}
 
-	var req SingUpReq
-	if err := c.Bind(&req); err != nil { //Bind 方法会根据请求的 Content-Type 来解析你的数据到req里面
+	var req SignUpReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		ginx.Error(c, ginx.CodeInvalidParams, "参数错误")
 		return
 	}
 
 	ok, err := u.emailExp.MatchString(req.Email)
 	if err != nil {
-		c.String(http.StatusOK, "系统错误")
+		ginx.Error(c, ginx.CodeInternalError, "系统错误")
 		return
 	}
 	if !ok {
-		c.String(http.StatusOK, "邮箱格式不正确")
+		ginx.Error(c, ginx.CodeInvalidParams, "邮箱格式不正确")
 		return
 	}
 
 	if req.Password != req.ConfirmPassword {
-		c.String(http.StatusOK, "密码不一致")
+		ginx.Error(c, ginx.CodeInvalidParams, "两次密码不一致")
 		return
 	}
 
 	ok, err = u.passwordExp.MatchString(req.Password)
 	if err != nil {
-		c.String(http.StatusOK, "系统错误")
+		ginx.Error(c, ginx.CodeInternalError, "系统错误")
 		return
 	}
 	if !ok {
-		c.String(http.StatusOK, "密码格式不正确")
+		ginx.Error(c, ginx.CodeInvalidParams, "密码长度应为6-16位")
 		return
 	}
 
@@ -91,14 +86,20 @@ func (u *UserHandler) Signup(c *gin.Context) {
 		Email:    req.Email,
 		Password: req.Password,
 	})
+	if err == service.ErrDuplicateEmail {
+		ginx.Error(c, ginx.CodeDuplicateEmail, "邮箱已被注册")
+		return
+	}
 	if err != nil {
-		c.String(http.StatusOK, "注册失败")
+		ginx.Error(c, ginx.CodeInternalError, "注册失败")
 		return
 	}
 
-	c.String(http.StatusOK, "注册成功")
+	ginx.SuccessMsg(c, "注册成功")
 }
 
+// Login 用户登录
+// POST /users/login
 func (u *UserHandler) Login(c *gin.Context) {
 	type LoginReq struct {
 		Email    string `json:"email"`
@@ -106,28 +107,107 @@ func (u *UserHandler) Login(c *gin.Context) {
 	}
 
 	var req LoginReq
-	if err := c.Bind(&req); err != nil {
+	if err := c.ShouldBindJSON(&req); err != nil {
+		ginx.Error(c, ginx.CodeInvalidParams, "参数错误")
 		return
 	}
 
 	user, err := u.svc.Login(c.Request.Context(), req.Email, req.Password)
 	if err == service.ErrInvalidUserOrPassword {
-		c.String(http.StatusOK, "邮箱或密码不正确")
+		ginx.Error(c, ginx.CodeUnauthorized, "邮箱或密码不正确")
 		return
 	}
 	if err != nil {
-		c.String(http.StatusOK, "系统错误")
+		ginx.Error(c, ginx.CodeInternalError, "系统错误")
 		return
 	}
 
-	c.String(http.StatusOK, "登录成功")
-	_ = user // 后续可用于设置 session
+	// 登录成功，设置 session
+	sess := sessions.Default(c)
+	sess.Set("userId", user.Id)
+	sess.Save()
+
+	ginx.Success(c, gin.H{
+		"userId": user.Id,
+	})
 }
 
-func (u *UserHandler) Edit(c *gin.Context) {
-
-}
-
+// Profile 获取用户信息
+// GET /users/:id
 func (u *UserHandler) Profile(c *gin.Context) {
+	// 从 URL 参数获取 id
+	idStr := c.Param("id")
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		ginx.Error(c, ginx.CodeInvalidParams, "无效的用户ID")
+		return
+	}
 
+	// 从 Context 获取当前登录用户（中间件已设置）
+	currentUserId := c.GetInt64("userId")
+	if currentUserId != id {
+		ginx.ErrorWithStatus(c, http.StatusForbidden, ginx.CodeForbidden, "无权访问")
+		return
+	}
+
+	user, err := u.svc.Profile(c.Request.Context(), id)
+	if err != nil {
+		ginx.Error(c, ginx.CodeNotFound, "用户不存在")
+		return
+	}
+
+	ginx.Success(c, gin.H{
+		"id":    user.Id,
+		"email": user.Email,
+	})
+}
+
+// EditPassword 修改密码
+// PUT /users/:id/password
+func (u *UserHandler) EditPassword(c *gin.Context) {
+	type EditPasswordReq struct {
+		OldPassword string `json:"oldPassword"`
+		NewPassword string `json:"newPassword"`
+	}
+
+	idStr := c.Param("id")
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		ginx.Error(c, ginx.CodeInvalidParams, "无效的用户ID")
+		return
+	}
+
+	currentUserId := c.GetInt64("userId")
+	if currentUserId != id {
+		ginx.ErrorWithStatus(c, http.StatusForbidden, ginx.CodeForbidden, "无权操作")
+		return
+	}
+
+	var req EditPasswordReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		ginx.Error(c, ginx.CodeInvalidParams, "参数错误")
+		return
+	}
+
+	ok, err := u.passwordExp.MatchString(req.NewPassword)
+	if err != nil {
+		ginx.Error(c, ginx.CodeInternalError, "系统错误")
+		return
+	}
+	if !ok {
+		ginx.Error(c, ginx.CodeInvalidParams, "新密码长度应为6-16位")
+		return
+	}
+
+	err = u.svc.UpdatePassword(c.Request.Context(), id, req.OldPassword, req.NewPassword)
+	if err == service.ErrInvalidUserOrPassword {
+		ginx.Error(c, ginx.CodeUnauthorized, "原密码不正确")
+		return
+	}
+	if err != nil {
+		ginx.Error(c, ginx.CodeInternalError, "修改失败")
+		return
+	}
+
+	ginx.SuccessMsg(c, "密码修改成功")
 }
