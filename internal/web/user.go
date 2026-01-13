@@ -125,8 +125,8 @@ func (u *UserHandler) Login(c *gin.Context) {
 		return
 	}
 
-	// 登录成功，生成 JWT Token
-	token, err := middleware.GenerateToken(user.Id, u.jwtExpireTime)
+	// 登录成功，生成 JWT Token（绑定 User-Agent 增强安全性）
+	token, err := middleware.GenerateToken(user.Id, c.GetHeader("User-Agent"), u.jwtExpireTime)
 	if err != nil {
 		ginx.Error(c, ginx.CodeInternalError, "生成Token失败")
 		return
@@ -177,7 +177,7 @@ func (u *UserHandler) EditPassword(c *gin.Context) {
 	}
 
 	idStr := c.Param("id")
-	id, err := strconv.ParseInt(idStr, 10, 64)
+	id, err := strconv.ParseInt(idStr, 10, 64) // idStr 转换为 int64
 	if err != nil {
 		ginx.Error(c, ginx.CodeInvalidParams, "无效的用户ID")
 		return

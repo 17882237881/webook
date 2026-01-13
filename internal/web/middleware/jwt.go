@@ -1,6 +1,8 @@
 package middleware
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"net/http"
 	"strings"
 	"time"
@@ -52,6 +54,11 @@ type UserClaims struct {
 	// 这是我们业务需要的数据，会被编码到 Token 中
 	UserId int64 `json:"userId"`
 
+	// UserAgent 用户代理哈希值（安全增强）
+	// 将 Token 绑定到特定的浏览器/设备，防止 Token 被盗用到其他设备
+	// 存储的是 User-Agent 的 SHA256 哈希值，而非原始值
+	UserAgent string `json:"userAgent"`
+
 	// RegisteredClaims JWT 标准字段（内嵌）
 	// 包含以下标准字段：
 	//   - ExpiresAt: 过期时间（exp）- Token 何时失效
@@ -67,11 +74,21 @@ type UserClaims struct {
 // 步骤2: 生成 Token（用户登录成功后调用）
 // ============================================================================
 
+// hashUserAgent 计算 User-Agent 的 SHA256 哈希值
+// 使用哈希而非原始值，可以：
+//  1. 减少 Token 体积（User-Agent 可能很长）
+//  2. 避免在 Token 中暴露用户的浏览器信息
+func hashUserAgent(userAgent string) string {
+	hash := sha256.Sum256([]byte(userAgent))
+	return hex.EncodeToString(hash[:])
+}
+
 // GenerateToken 生成 JWT Token
 // 在用户登录验证成功后调用此函数，生成一个包含用户信息的 Token
 //
 // 参数:
 //   - userId:     用户 ID，将被编码到 Token 中
+//   - userAgent:  用户的 User-Agent，用于绑定设备（安全增强）
 //   - expireTime: Token 有效期，如 24*time.Hour 表示 24 小时后过期
 //
 // 返回:
@@ -80,13 +97,14 @@ type UserClaims struct {
 //
 // 使用示例:
 //
-//	token, err := middleware.GenerateToken(user.Id, 24*time.Hour)
+//	token, err := middleware.GenerateToken(user.Id, c.GetHeader("User-Agent"), 24*time.Hour)
 //	c.Header("x-jwt-token", token) // 返回给前端
-func GenerateToken(userId int64, expireTime time.Duration) (string, error) {
+func GenerateToken(userId int64, userAgent string, expireTime time.Duration) (string, error) {
 	// 第一步：构造 Payload（Claims）
 	// 创建包含用户信息和标准字段的 Claims 结构
 	claims := UserClaims{
-		UserId: userId, // 存入用户 ID
+		UserId:    userId,                   // 存入用户 ID
+		UserAgent: hashUserAgent(userAgent), // 存入 User-Agent 哈希值（安全绑定）
 		RegisteredClaims: jwt.RegisteredClaims{
 			// ExpiresAt: 设置过期时间
 			// 当前时间 + expireTime = Token 失效时间
@@ -219,7 +237,19 @@ func (j *JWTMiddlewareBuilder) Build() gin.HandlerFunc {
 		}
 
 		// ========================================
-		// 第六步：将用户信息存入 Context
+		// 第六步：验证 User-Agent（安全增强）
+		// ========================================
+		// 检查当前请求的 User-Agent 是否与 Token 中绑定的一致
+		// 如果不一致，说明 Token 可能被盗用到了其他设备
+		currentUA := hashUserAgent(c.GetHeader("User-Agent"))
+		if claims.UserAgent != "" && claims.UserAgent != currentUA {
+			// User-Agent 不匹配，可能是 Token 被盗用
+			c.AbortWithStatus(http.StatusUnauthorized)
+			return
+		}
+
+		// ========================================
+		// 第七步：将用户信息存入 Context
 		// ========================================
 		// 验证通过后，将 claims 中的 userId 存入 Gin 的 Context
 		// 后续的处理函数可以通过 c.Get("userId") 或 c.GetInt64("userId") 获取

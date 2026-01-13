@@ -1,0 +1,12 @@
+# 忽略不需要复制到镜像中的文件
+.git
+.gitignore
+*.md
+*.exe
+frontend/
+k8s/
+*.sh
+*.ps1
+docker-compose.yaml
+Dockerfile
+.dockerignore
