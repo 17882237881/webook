@@ -80,6 +80,5 @@ spec:
   ports:
     - port: 80
       targetPort: 8080
-  # LoadBalancer 类型，云环境会自动分配外部 IP
-  # 本地测试可改为 NodePort
-  type: LoadBalancer
+  # ClusterIP 类型，前端 nginx 代理访问
+  type: ClusterIP

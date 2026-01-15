@@ -3,6 +3,7 @@ package main
 import (
 	"webook/config"
 	"webook/internal/repository"
+	"webook/internal/repository/cache"
 	"webook/internal/repository/dao"
 	"webook/internal/service"
 	"webook/internal/web"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
+	"github.com/redis/go-redis/v9"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
 )
@@ -21,12 +23,19 @@ func main() {
 	// 初始化数据库
 	db := initDB(cfg)
 
+	// 初始化 Redis
+	rdb := redis.NewClient(&redis.Options{
+		Addr:     cfg.Redis.Addr,
+		Password: cfg.Redis.Password,
+	})
+
 	// 初始化 JWT
 	middleware.InitJWT(cfg.JWT.SecretKey)
 
-	// 依赖注入：DAO → Repository → Service → Handler
+	// 依赖注入：DAO → Cache → Repository → Service → Handler
 	userDAO := dao.NewUserDAO(db)
-	userRepo := repository.NewUserRepository(userDAO)
+	userCache := cache.NewUserCache(rdb, cfg.Cache.UserExpiration)
+	userRepo := repository.NewUserRepository(userDAO, userCache)
 	userSvc := service.NewUserService(userRepo)
 	u := web.NewUserHandler(userSvc, cfg.JWT.ExpireTime)
 

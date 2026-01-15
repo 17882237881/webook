@@ -43,15 +43,15 @@
                               ↓ 调用接口
 ┌─────────────────────────────────────────────────────────────┐
 │                  Repository 层 (repository/)                 │
-│  负责：数据持久化、领域对象转换                                │
+│  负责：数据持久化、缓存管理、领域对象转换                       │
 │  文件：internal/repository/user.go                            │
 └─────────────────────────────────────────────────────────────┘
-                              ↓ 调用
-┌─────────────────────────────────────────────────────────────┐
-│                       DAO 层 (dao/)                          │
-│  负责：数据库操作、SQL 执行                                    │
-│  文件：internal/repository/dao/user.go                        │
-└─────────────────────────────────────────────────────────────┘
+                    ↓ 调用                    ↓ 调用
+┌────────────────────────────┐    ┌────────────────────────────┐
+│       DAO 层 (dao/)         │    │     Cache 层 (cache/)       │
+│  负责：数据库操作、SQL 执行   │    │  负责：Redis 缓存操作        │
+│  文件：dao/user.go           │    │  文件：cache/user.go         │
+└────────────────────────────┘    └────────────────────────────┘
 ```
 
 ### 为什么这样设计？
@@ -67,9 +67,10 @@
 在 `main.go` 中手动组装依赖：
 
 ```go
-// DAO → Repository → Service → Handler
+// DAO → Cache → Repository → Service → Handler
 userDAO := dao.NewUserDAO(db)
-userRepo := repository.NewUserRepository(userDAO)
+userCache := cache.NewUserCache(rdb, cfg.Cache.UserExpiration)
+userRepo := repository.NewUserRepository(userDAO, userCache)
 userSvc := service.NewUserService(userRepo)
 u := web.NewUserHandler(userSvc, cfg.JWT.ExpireTime)
 ```
@@ -135,6 +136,53 @@ type UserClaims struct {
 
 ```
 请求到达 → 检查白名单 → 提取 Token → 验证签名 → 检查过期 → 验证 User-Agent → 放行
+```
+
+---
+
+### 4. Redis 缓存层
+
+**缓存策略：Cache-Aside 模式**
+
+```
+查询用户 → 检查缓存 → 命中 → 直接返回
+              ↓ 未命中
+          查询数据库 → 回写缓存 → 返回
+```
+
+**缓存实现：**
+
+```go
+// internal/repository/cache/user.go
+type UserCache interface {
+    Get(ctx context.Context, id int64) (domain.User, error)
+    Set(ctx context.Context, u domain.User) error
+    Delete(ctx context.Context, id int64) error
+}
+```
+
+**缓存 Key 设计：**
+
+```go
+func (c *RedisUserCache) key(id int64) string {
+    return fmt.Sprintf("user:info:%d", id)
+}
+```
+
+**缓存一致性保证：**
+
+| 操作 | 缓存处理 |
+|------|----------|
+| 查询用户 | 先查缓存，未命中查 DB 并异步回写 |
+| 修改密码 | 更新 DB 后删除缓存 |
+| 注册用户 | 不预热缓存（首次登录时缓存） |
+
+**配置项（config/config.go）：**
+
+```go
+type CacheConfig struct {
+    UserExpiration time.Duration // 用户缓存过期时间，默认 15 分钟
+}
 ```
 
 ---
@@ -261,6 +309,7 @@ func Error(c *gin.Context, code int, msg string) {
 | 统一错误信息 | 防止信息泄露 |
 | 权限验证 | 只能访问/修改自己的资源 |
 | 接口白名单 | 登录/注册无需 Token |
+| Redis 缓存 | 减少 DB 压力，提升性能 |
 
 ---
 
@@ -380,6 +429,8 @@ internal/
 │   └── user.go          # UserService
 └── repository/          # 数据持久化层
     ├── user.go          # UserRepository
+    ├── cache/           # 缓存层
+    │   └── user.go      # UserCache (Redis)
     └── dao/             # 数据访问对象
         └── user.go      # UserDAO
 ```
@@ -390,13 +441,15 @@ internal/
 
 本模块实现了一个安全、可扩展的用户认证系统：
 
-1. **分层架构**：Handler → Service → Repository → DAO
+1. **分层架构**：Handler → Service → Repository → DAO/Cache
 2. **安全设计**：bcrypt 密码加密、JWT Token、User-Agent 绑定
-3. **统一规范**：RESTful API、统一响应格式、错误码体系
-4. **问题驱动**：每个设计决策都有其背景和原因
+3. **性能优化**：Redis 缓存用户信息，减少数据库查询
+4. **统一规范**：RESTful API、统一响应格式、错误码体系
+5. **问题驱动**：每个设计决策都有其背景和原因
 
 下一步可扩展：
 - 短信/邮箱验证码登录
 - OAuth 第三方登录
 - Token 刷新机制
 - 登录日志审计
+- 登录接口缓存优化（email → userId 索引）
