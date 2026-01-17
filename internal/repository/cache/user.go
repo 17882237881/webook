@@ -25,11 +25,14 @@ type RedisUserCache struct {
 	expiration time.Duration // 缓存过期时间
 }
 
+// UserCacheExpiration 用户缓存过期时间类型（用于 Wire 依赖注入）
+type UserCacheExpiration time.Duration
+
 // NewUserCache 创建用户缓存实例
-func NewUserCache(client redis.Cmdable, expiration time.Duration) UserCache {
+func NewUserCache(client redis.Cmdable, expiration UserCacheExpiration) UserCache {
 	return &RedisUserCache{
 		client:     client,
-		expiration: expiration,
+		expiration: time.Duration(expiration),
 	}
 }
 

@@ -62,17 +62,58 @@
 | **可维护性** | 修改一层不影响其他层 |
 | **可扩展性** | 如需换数据库，只改 DAO 层 |
 
-### 依赖注入
+### 依赖注入 (Wire)
 
-在 `main.go` 中手动组装依赖：
+使用 [Google Wire](https://github.com/google/wire) 进行编译时依赖注入，自动生成依赖组装代码。
+
+**依赖链：**
+
+```
+config.Load → ioc.NewDB → dao.NewUserDAO → repository.NewUserRepository → service.NewUserService → web.NewUserHandler → ioc.NewGinEngine
+                  ↓                                      ↑
+            ioc.NewRedis → cache.NewUserCache ──────────┘
+```
+
+**Wire 配置 (`wire.go`):**
 
 ```go
-// DAO → Cache → Repository → Service → Handler
-userDAO := dao.NewUserDAO(db)
-userCache := cache.NewUserCache(rdb, cfg.Cache.UserExpiration)
-userRepo := repository.NewUserRepository(userDAO, userCache)
-userSvc := service.NewUserService(userRepo)
-u := web.NewUserHandler(userSvc, cfg.JWT.ExpireTime)
+//go:build wireinject
+
+func InitWebServer() *gin.Engine {
+    wire.Build(
+        config.Load,              // 配置
+        ioc.NewDB,                // 数据库
+        ioc.NewRedis,             // Redis
+        dao.NewUserDAO,           // DAO 层
+        cache.NewUserCache,       // Cache 层
+        repository.NewUserRepository, // Repository 层
+        service.NewUserService,   // Service 层
+        web.NewUserHandler,       // Handler 层
+        ioc.NewGinEngine,         // Web 引擎
+    )
+    return nil
+}
+```
+
+**Wire 命令：**
+
+```powershell
+# 安装 Wire
+go install github.com/google/wire/cmd/wire@latest
+
+# 生成依赖注入代码
+cd d:\go\webook
+wire
+```
+
+生成的 `wire_gen.go` 包含真正的依赖组装代码，`main.go` 直接调用：
+
+```go
+func main() {
+    server := InitWebServer()
+    cfg := config.Load()
+    server.Run(cfg.Server.Port)
+}
 ```
 
 ---
@@ -417,22 +458,32 @@ Authorization: Bearer <token>
 ## 项目文件结构
 
 ```
-internal/
-├── domain/              # 领域对象
-│   └── user.go          # User 结构体
-├── web/                 # HTTP 处理层
-│   ├── user.go          # UserHandler
-│   └── middleware/      # 中间件
-│       ├── jwt.go       # JWT 认证
-│       └── login.go     # Session 认证（备选）
-├── service/             # 业务逻辑层
-│   └── user.go          # UserService
-└── repository/          # 数据持久化层
-    ├── user.go          # UserRepository
-    ├── cache/           # 缓存层
-    │   └── user.go      # UserCache (Redis)
-    └── dao/             # 数据访问对象
-        └── user.go      # UserDAO
+webook/
+├── wire.go              # Wire 注入器定义
+├── wire_gen.go          # Wire 自动生成的依赖注入代码
+├── main.go              # 应用入口
+├── config/              # 配置管理
+│   └── config.go
+├── ioc/                 # IOC 容器 (Provider 函数)
+│   ├── db.go            # 数据库 Provider
+│   ├── redis.go         # Redis Provider
+│   └── web.go           # Gin Engine + 中间件 Provider
+└── internal/
+    ├── domain/          # 领域对象
+    │   └── user.go
+    ├── web/             # HTTP 处理层
+    │   ├── user.go      # UserHandler
+    │   └── middleware/  # 中间件
+    │       ├── jwt.go   # JWT 认证
+    │       └── login.go # Session 认证（备选）
+    ├── service/         # 业务逻辑层
+    │   └── user.go
+    └── repository/      # 数据持久化层
+        ├── user.go
+        ├── cache/       # 缓存层
+        │   └── user.go  # UserCache (Redis)
+        └── dao/         # 数据访问对象
+            └── user.go  # UserDAO
 ```
 
 ---
@@ -442,10 +493,10 @@ internal/
 本模块实现了一个安全、可扩展的用户认证系统：
 
 1. **分层架构**：Handler → Service → Repository → DAO/Cache
-2. **安全设计**：bcrypt 密码加密、JWT Token、User-Agent 绑定
-3. **性能优化**：Redis 缓存用户信息，减少数据库查询
-4. **统一规范**：RESTful API、统一响应格式、错误码体系
-5. **问题驱动**：每个设计决策都有其背景和原因
+2. **Wire 依赖注入**：编译时代码生成，零运行时开销
+3. **安全设计**：bcrypt 密码加密、JWT Token、User-Agent 绑定
+4. **性能优化**：Redis 缓存用户信息，减少数据库查询
+5. **统一规范**：RESTful API、统一响应格式、错误码体系
 
 下一步可扩展：
 - 短信/邮箱验证码登录

@@ -21,8 +21,11 @@ type UserHandler struct {
 	jwtExpireTime time.Duration
 }
 
+// JWTExpireTime JWT 过期时间类型（用于 Wire 依赖注入）
+type JWTExpireTime time.Duration
+
 // NewUserHandler 创建 UserHandler 实例
-func NewUserHandler(svc service.UserService, jwtExpireTime time.Duration) *UserHandler {
+func NewUserHandler(svc service.UserService, jwtExpireTime JWTExpireTime) *UserHandler {
 	const (
 		emailRegex    = `^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$`
 		passwordRegex = `^.{6,16}$`
@@ -31,7 +34,7 @@ func NewUserHandler(svc service.UserService, jwtExpireTime time.Duration) *UserH
 		svc:           svc,
 		emailExp:      regexp.MustCompile(emailRegex, regexp.None),
 		passwordExp:   regexp.MustCompile(passwordRegex, regexp.None),
-		jwtExpireTime: jwtExpireTime,
+		jwtExpireTime: time.Duration(jwtExpireTime),
 	}
 }
 
