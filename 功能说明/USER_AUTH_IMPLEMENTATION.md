@@ -179,6 +179,87 @@ type UserClaims struct {
 请求到达 → 检查白名单 → 提取 Token → 验证签名 → 检查过期 → 验证 User-Agent → 放行
 ```
 
+### 3.1 长短 Token 机制
+
+使用 **Access Token + Refresh Token** 双 Token 机制，平衡安全性和用户体验。
+
+| Token | 有效期 | 用途 | 存储建议 |
+|-------|--------|------|----------|
+| Access Token | 30 分钟 | API 访问认证 | 内存/sessionStorage |
+| Refresh Token | 7 天 | 刷新 Access Token | HttpOnly Cookie |
+
+**工作流程：**
+
+```
+1. 用户登录 → 返回 Access Token + Refresh Token
+2. 用 Access Token 访问 API
+3. Access Token 过期（401）→ 用 Refresh Token 调用 /auth/refresh
+4. 获取新的 Access Token → 继续访问
+5. Refresh Token 过期 → 重新登录
+```
+
+**Refresh Token 刷新原理：**
+
+```go
+// POST /auth/refresh
+func (u *UserHandler) RefreshToken(c *gin.Context) {
+    // 1. 解析 Refresh Token，提取 userId
+    claims, err := middleware.ParseRefreshToken(req.RefreshToken)
+    
+    // 2. 用 userId 生成新的 Access Token
+    accessToken, err := middleware.GenerateAccessToken(claims.UserId, userAgent, expireTime)
+    
+    // 3. 返回新 Token
+    ginx.Success(c, gin.H{"accessToken": accessToken})
+}
+```
+
+**关键设计：**
+- **独立密钥**：Access Token 和 Refresh Token 使用不同的签名密钥
+- **最小化载荷**：Refresh Token 只存储 userId 和 SSid
+- **白名单**：`/auth/refresh` 和 `/auth/logout` 接口无需 Access Token 认证
+
+### 3.2 退出登录
+
+使用 **Redis 黑名单** 机制使 Refresh Token 失效。
+
+**API 接口：**
+
+```
+POST /auth/logout
+请求体：{ "refreshToken": "xxx" }
+响应：{ "msg": "退出成功" }
+```
+
+**工作流程：**
+
+```
+1. 用户调用 /auth/logout，携带 refreshToken
+2. 服务端解析 Token，提取 SSid
+3. 将 SSid 加入 Redis 黑名单（TTL = Refresh Token 剩余有效期）
+4. 后续使用该 Refresh Token 刷新时被拒绝
+```
+
+**实现代码：**
+
+```go
+// POST /auth/logout
+func (u *UserHandler) Logout(c *gin.Context) {
+    // 1. 解析 Refresh Token 获取 SSid
+    claims, _ := middleware.ParseRefreshToken(req.RefreshToken)
+    
+    // 2. 将 SSid 加入 Redis 黑名单
+    u.blacklist.Add(ctx, claims.SSid, u.refreshExpireTime)
+    
+    ginx.SuccessMsg(c, "退出成功")
+}
+```
+
+**黑名单 Key 设计：**
+```
+token:blacklist:{ssid}
+```
+
 ---
 
 ### 4. Redis 缓存层

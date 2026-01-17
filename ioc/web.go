@@ -31,7 +31,7 @@ func NewGinEngine(cfg *config.Config, userHandler *web.UserHandler) *gin.Engine 
 
 	// JWT 登录校验中间件 - RESTful 路径白名单
 	server.Use(middleware.NewJWTMiddlewareBuilder().
-		IgnorePaths("/users", "/users/login"). // POST /users 注册, POST /users/login 登录
+		IgnorePaths("/users", "/users/login", "/auth/refresh", "/auth/logout"). // 注册、登录、刷新、退出
 		Build())
 
 	// 注册路由

@@ -39,8 +39,9 @@ type CacheConfig struct {
 }
 
 type JWTConfig struct {
-	SecretKey  string
-	ExpireTime time.Duration
+	SecretKey         string
+	ExpireTime        time.Duration // Access Token 有效期
+	RefreshExpireTime time.Duration // Refresh Token 有效期
 }
 
 type CORSConfig struct {
@@ -65,8 +66,9 @@ func Load() *Config {
 			UserExpiration: 15 * time.Minute,
 		},
 		JWT: JWTConfig{
-			SecretKey:  getEnv("JWT_SECRET", "your-jwt-secret-key"),
-			ExpireTime: 30 * time.Minute,
+			SecretKey:         getEnv("JWT_SECRET", "your-jwt-secret-key"),
+			ExpireTime:        30 * time.Minute,   // Access Token 30 分钟
+			RefreshExpireTime: 7 * 24 * time.Hour, // Refresh Token 7 天
 		},
 		Session: SessionConfig{
 			Secret: getEnv("SESSION_SECRET", "your-secret-key-change-in-production"),

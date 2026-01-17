@@ -29,8 +29,10 @@ func InitWebServer() *gin.Engine {
 	userCache := cache.NewUserCache(cmdable, userCacheExpiration)
 	userRepository := repository.NewUserRepository(userDAO, userCache)
 	userService := service.NewUserService(userRepository)
+	tokenBlacklist := cache.NewTokenBlacklist(cmdable)
 	jwtExpireTime := ProvideJWTExpireTime(configConfig)
-	userHandler := web.NewUserHandler(userService, jwtExpireTime)
+	refreshExpireTime := ProvideRefreshExpireTime(configConfig)
+	userHandler := web.NewUserHandler(userService, tokenBlacklist, jwtExpireTime, refreshExpireTime)
 	engine := ioc.NewGinEngine(configConfig, userHandler)
 	return engine
 }
@@ -42,7 +44,12 @@ func ProvideUserCacheExpiration(cfg *config.Config) cache.UserCacheExpiration {
 	return cache.UserCacheExpiration(cfg.Cache.UserExpiration)
 }
 
-// ProvideJWTExpireTime 提供 JWT 过期时间
+// ProvideJWTExpireTime 提供 Access Token 过期时间
 func ProvideJWTExpireTime(cfg *config.Config) web.JWTExpireTime {
 	return web.JWTExpireTime(cfg.JWT.ExpireTime)
+}
+
+// ProvideRefreshExpireTime 提供 Refresh Token 过期时间
+func ProvideRefreshExpireTime(cfg *config.Config) web.RefreshExpireTime {
+	return web.RefreshExpireTime(cfg.JWT.RefreshExpireTime)
 }

@@ -31,6 +31,7 @@ func InitWebServer() *gin.Engine {
 		// Cache 层
 		ProvideUserCacheExpiration,
 		cache.NewUserCache,
+		cache.NewTokenBlacklist,
 
 		// Repository 层
 		repository.NewUserRepository,
@@ -40,6 +41,7 @@ func InitWebServer() *gin.Engine {
 
 		// Handler 层
 		ProvideJWTExpireTime,
+		ProvideRefreshExpireTime,
 		web.NewUserHandler,
 
 		// Web 层
@@ -53,7 +55,12 @@ func ProvideUserCacheExpiration(cfg *config.Config) cache.UserCacheExpiration {
 	return cache.UserCacheExpiration(cfg.Cache.UserExpiration)
 }
 
-// ProvideJWTExpireTime 提供 JWT 过期时间
+// ProvideJWTExpireTime 提供 Access Token 过期时间
 func ProvideJWTExpireTime(cfg *config.Config) web.JWTExpireTime {
 	return web.JWTExpireTime(cfg.JWT.ExpireTime)
+}
+
+// ProvideRefreshExpireTime 提供 Refresh Token 过期时间
+func ProvideRefreshExpireTime(cfg *config.Config) web.RefreshExpireTime {
+	return web.RefreshExpireTime(cfg.JWT.RefreshExpireTime)
 }

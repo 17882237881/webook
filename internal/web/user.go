@@ -5,36 +5,45 @@ import (
 	"strconv"
 	"time"
 	"webook/internal/domain"
+	"webook/internal/repository/cache"
 	"webook/internal/service"
 	"webook/internal/web/middleware"
 	"webook/pkg/ginx"
 
 	regexp "github.com/dlclark/regexp2"
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 )
 
 // UserHandler 处理用户相关的请求
 type UserHandler struct {
-	svc           service.UserService // 依赖接口
-	emailExp      *regexp.Regexp
-	passwordExp   *regexp.Regexp
-	jwtExpireTime time.Duration
+	svc               service.UserService  // 依赖接口
+	blacklist         cache.TokenBlacklist // Token 黑名单
+	emailExp          *regexp.Regexp
+	passwordExp       *regexp.Regexp
+	jwtExpireTime     time.Duration // Access Token 有效期
+	refreshExpireTime time.Duration // Refresh Token 有效期
 }
 
-// JWTExpireTime JWT 过期时间类型（用于 Wire 依赖注入）
+// JWTExpireTime Access Token 过期时间类型（用于 Wire 依赖注入）
 type JWTExpireTime time.Duration
 
+// RefreshExpireTime Refresh Token 过期时间类型（用于 Wire 依赖注入）
+type RefreshExpireTime time.Duration
+
 // NewUserHandler 创建 UserHandler 实例
-func NewUserHandler(svc service.UserService, jwtExpireTime JWTExpireTime) *UserHandler {
+func NewUserHandler(svc service.UserService, blacklist cache.TokenBlacklist, jwtExpireTime JWTExpireTime, refreshExpireTime RefreshExpireTime) *UserHandler {
 	const (
 		emailRegex    = `^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$`
 		passwordRegex = `^.{6,16}$`
 	)
 	return &UserHandler{
-		svc:           svc,
-		emailExp:      regexp.MustCompile(emailRegex, regexp.None),
-		passwordExp:   regexp.MustCompile(passwordRegex, regexp.None),
-		jwtExpireTime: time.Duration(jwtExpireTime),
+		svc:               svc,
+		blacklist:         blacklist,
+		emailExp:          regexp.MustCompile(emailRegex, regexp.None),
+		passwordExp:       regexp.MustCompile(passwordRegex, regexp.None),
+		jwtExpireTime:     time.Duration(jwtExpireTime),
+		refreshExpireTime: time.Duration(refreshExpireTime),
 	}
 }
 
@@ -46,6 +55,10 @@ func (u *UserHandler) RegisterRoutes(server *gin.Engine) {
 	ug.POST("/login", u.Login)              // 登录（action 风格）
 	ug.GET("/:id", u.Profile)               // 获取用户信息
 	ug.PUT("/:id/password", u.EditPassword) // 修改密码
+
+	// 认证相关
+	server.POST("/auth/refresh", u.RefreshToken) // 刷新 Token
+	server.POST("/auth/logout", u.Logout)        // 退出登录
 }
 
 // SignUp 用户注册
@@ -128,17 +141,98 @@ func (u *UserHandler) Login(c *gin.Context) {
 		return
 	}
 
-	// 登录成功，生成 JWT Token（绑定 User-Agent 增强安全性）
-	token, err := middleware.GenerateToken(user.Id, c.GetHeader("User-Agent"), u.jwtExpireTime)
+	// 登录成功，生成 Token 对（Access Token + Refresh Token）
+	// 生成唯一的 Session ID 用于退出登录时加入黑名单
+	ssid := uuid.New().String()
+	accessToken, refreshToken, err := middleware.GenerateTokenPair(
+		user.Id,
+		c.GetHeader("User-Agent"),
+		ssid,
+		u.jwtExpireTime,
+		u.refreshExpireTime,
+	)
 	if err != nil {
 		ginx.Error(c, ginx.CodeInternalError, "生成Token失败")
 		return
 	}
 
 	ginx.Success(c, gin.H{
-		"userId": user.Id,
-		"token":  token,
+		"userId":       user.Id,
+		"accessToken":  accessToken,
+		"refreshToken": refreshToken,
 	})
+}
+
+// RefreshToken 刷新 Access Token
+// POST /auth/refresh
+// 使用 Refresh Token 获取新的 Access Token
+func (u *UserHandler) RefreshToken(c *gin.Context) {
+	type RefreshReq struct {
+		RefreshToken string `json:"refreshToken"`
+	}
+
+	var req RefreshReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		ginx.Error(c, ginx.CodeInvalidParams, "参数错误")
+		return
+	}
+
+	// 解析并验证 Refresh Token
+	claims, err := middleware.ParseRefreshToken(req.RefreshToken)
+	if err != nil {
+		ginx.Error(c, ginx.CodeUnauthorized, "Refresh Token 无效或已过期")
+		return
+	}
+
+	// 检查黑名单
+	isBlacklisted, err := u.blacklist.IsBlacklisted(c.Request.Context(), claims.SSid)
+	if err != nil || isBlacklisted {
+		ginx.Error(c, ginx.CodeUnauthorized, "Token 已失效，请重新登录")
+		return
+	}
+
+	// 生成新的 Access Token
+	accessToken, err := middleware.GenerateAccessToken(
+		claims.UserId,
+		c.GetHeader("User-Agent"),
+		u.jwtExpireTime,
+	)
+	if err != nil {
+		ginx.Error(c, ginx.CodeInternalError, "生成Token失败")
+		return
+	}
+
+	ginx.Success(c, gin.H{
+		"accessToken": accessToken,
+	})
+}
+
+// Logout 退出登录
+// POST /auth/logout
+// 将 Refresh Token 加入黑名单
+func (u *UserHandler) Logout(c *gin.Context) {
+	type LogoutReq struct {
+		RefreshToken string `json:"refreshToken"`
+	}
+
+	var req LogoutReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		ginx.Error(c, ginx.CodeInvalidParams, "参数错误")
+		return
+	}
+
+	// 解析 Refresh Token 获取 SSid
+	claims, err := middleware.ParseRefreshToken(req.RefreshToken)
+	if err != nil {
+		// Token 无效也算退出成功
+		ginx.SuccessMsg(c, "退出成功")
+		return
+	}
+
+	// 将 SSid 加入黑名单，过期时间 = Refresh Token 剩余有效期
+	_ = u.blacklist.Add(c.Request.Context(), claims.SSid, u.refreshExpireTime)
+
+	ginx.SuccessMsg(c, "退出成功")
 }
 
 // Profile 获取用户信息

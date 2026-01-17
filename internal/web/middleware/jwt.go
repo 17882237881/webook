@@ -26,10 +26,14 @@ import (
 //   步骤4: 验证 Token（中间件验证每个请求的 Token）
 // ============================================================================
 
-// jwtSecretKey JWT 签名密钥
-// 用于生成和验证 Token 的签名，必须保密
-// 如果密钥泄露，任何人都可以伪造有效的 Token
+// jwtSecretKey Access Token 签名密钥
+// 用于生成和验证短期 Access Token 的签名
 var jwtSecretKey []byte
+
+// refreshSecretKey Refresh Token 签名密钥
+// 用于生成和验证长期 Refresh Token 的签名
+// 使用不同的密钥增强安全性，即使 Access Token 密钥泄露，Refresh Token 仍然安全
+var refreshSecretKey []byte
 
 // ============================================================================
 // 步骤1: 初始化密钥
@@ -37,10 +41,18 @@ var jwtSecretKey []byte
 
 // InitJWT 初始化 JWT 密钥
 // 必须在程序启动时调用，设置用于签名和验证的密钥
-// 参数 secretKey: 密钥字符串，建议从环境变量或配置中心读取，不要硬编码
-// 使用示例: middleware.InitJWT(os.Getenv("JWT_SECRET"))
-func InitJWT(secretKey string) {
-	jwtSecretKey = []byte(secretKey)
+// 参数:
+//   - accessKey: Access Token 密钥（短期 Token）
+//   - refreshKey: Refresh Token 密钥（长期 Token），可选，为空则使用 accessKey + "_refresh"
+//
+// 使用示例: middleware.InitJWT("your-access-secret", "your-refresh-secret")
+func InitJWT(accessKey string, refreshKey ...string) {
+	jwtSecretKey = []byte(accessKey)
+	if len(refreshKey) > 0 && refreshKey[0] != "" {
+		refreshSecretKey = []byte(refreshKey[0])
+	} else {
+		refreshSecretKey = []byte(accessKey + "_refresh")
+	}
 }
 
 // ============================================================================
@@ -129,6 +141,104 @@ func GenerateToken(userId int64, userAgent string, expireTime time.Duration) (st
 	//   3. 将签名结果 Base64Url 编码
 	//   4. 拼接成最终格式：Header.Payload.Signature
 	return token.SignedString(jwtSecretKey)
+}
+
+// ============================================================================
+// 长短 Token 机制（Access Token + Refresh Token）
+// ============================================================================
+// Access Token:  短期有效（如 30 分钟），用于 API 访问
+// Refresh Token: 长期有效（如 7 天），用于刷新 Access Token
+//
+// 使用流程：
+//   1. 用户登录 → 返回 Access Token + Refresh Token
+//   2. 用 Access Token 访问 API
+//   3. Access Token 过期 → 用 Refresh Token 获取新的 Access Token
+//   4. Refresh Token 过期 → 用户需要重新登录
+// ============================================================================
+
+// RefreshClaims Refresh Token 的 Claims
+// 相比 Access Token，Refresh Token 只需要存储 userId，不需要 UserAgent
+// 因为 Refresh Token 只用于换取新的 Access Token，不用于 API 访问
+type RefreshClaims struct {
+	UserId int64  `json:"userId"`
+	SSid   string `json:"ssid"` // Session ID，用于黑名单标识
+	jwt.RegisteredClaims
+}
+
+// GenerateAccessToken 生成 Access Token（短期 Token）
+// 封装 GenerateToken，用于长短 Token 机制
+func GenerateAccessToken(userId int64, userAgent string, expireTime time.Duration) (string, error) {
+	return GenerateToken(userId, userAgent, expireTime)
+}
+
+// GenerateRefreshToken 生成 Refresh Token（长期 Token）
+// Refresh Token 使用独立的密钥签名，有效期较长（如 7 天）
+//
+// 参数:
+//   - userId: 用户 ID
+//   - ssid: Session ID，用于标识此次登录会话，退出时用于加入黑名单
+//   - expireTime: 有效期，建议 7 天或更长
+//
+// 返回:
+//   - string: Refresh Token 字符串
+//   - error: 签名错误
+func GenerateRefreshToken(userId int64, ssid string, expireTime time.Duration) (string, error) {
+	claims := RefreshClaims{
+		UserId: userId,
+		SSid:   ssid,
+		RegisteredClaims: jwt.RegisteredClaims{
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(expireTime)),
+			IssuedAt:  jwt.NewNumericDate(time.Now()),
+		},
+	}
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	return token.SignedString(refreshSecretKey)
+}
+
+// GenerateTokenPair 生成 Token 对（Access Token + Refresh Token）
+// 登录成功后调用此函数，一次性生成两个 Token
+//
+// 参数:
+//   - userId: 用户 ID
+//   - userAgent: 用户 User-Agent（用于 Access Token 设备绑定）
+//   - ssid: Session ID，用于标识此次登录会话
+//   - accessExpire: Access Token 有效期（建议 30 分钟）
+//   - refreshExpire: Refresh Token 有效期（建议 7 天）
+//
+// 返回:
+//   - accessToken: 短期 Token，用于 API 访问
+//   - refreshToken: 长期 Token，用于刷新 Access Token
+//   - error: 生成错误
+func GenerateTokenPair(userId int64, userAgent, ssid string, accessExpire, refreshExpire time.Duration) (accessToken, refreshToken string, err error) {
+	accessToken, err = GenerateAccessToken(userId, userAgent, accessExpire)
+	if err != nil {
+		return "", "", err
+	}
+	refreshToken, err = GenerateRefreshToken(userId, ssid, refreshExpire)
+	if err != nil {
+		return "", "", err
+	}
+	return accessToken, refreshToken, nil
+}
+
+// ParseRefreshToken 解析并验证 Refresh Token
+// 用于刷新接口，验证 Refresh Token 是否有效
+//
+// 参数:
+//   - tokenString: Refresh Token 字符串
+//
+// 返回:
+//   - *RefreshClaims: 解析出的 Claims（包含 userId）
+//   - error: 解析或验证错误（过期、签名无效等）
+func ParseRefreshToken(tokenString string) (*RefreshClaims, error) {
+	claims := &RefreshClaims{}
+	token, err := jwt.ParseWithClaims(tokenString, claims, func(token *jwt.Token) (interface{}, error) {
+		return refreshSecretKey, nil
+	})
+	if err != nil || !token.Valid {
+		return nil, err
+	}
+	return claims, nil
 }
 
 // ============================================================================
