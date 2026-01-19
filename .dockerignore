@@ -4,9 +4,9 @@
 *.md
 *.exe
 frontend/
-k8s/
+deploy/k8s/
 *.sh
 *.ps1
-docker-compose.yaml
-Dockerfile
+deploy/docker/docker-compose.yaml
+deploy/docker/Dockerfile
 .dockerignore

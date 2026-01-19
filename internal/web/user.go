@@ -7,8 +7,8 @@ import (
 	"webook/internal/domain"
 	"webook/internal/repository/cache"
 	"webook/internal/service"
+	"webook/internal/web/ginx"
 	"webook/internal/web/middleware"
-	"webook/pkg/ginx"
 
 	regexp "github.com/dlclark/regexp2"
 	"github.com/gin-gonic/gin"

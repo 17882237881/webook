@@ -1,0 +1,17 @@
+﻿# Build artifacts
+/build.log
+/webook.exe
+/webook-linux
+/dist/
+/bin/
+
+# Frontend deps
+/frontend/node_modules/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
