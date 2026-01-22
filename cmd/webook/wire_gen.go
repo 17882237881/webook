@@ -7,6 +7,8 @@
 package main
 
 import (
+	"time"
+
 	"github.com/gin-gonic/gin"
 	"webook/config"
 	"webook/internal/ioc"
@@ -17,46 +19,48 @@ import (
 	"webook/internal/web"
 )
 
-// Injectors from wire.go:
-
-// InitWebServer 初始化 Web 服务器，使用 Wire 进行依赖注入
+// InitWebServer initializes the web server.
 func InitWebServer(cfg *config.Config) *gin.Engine {
 	db := ioc.NewDB(cfg)
 	userDAO := dao.NewUserDAO(db)
+	postDAO := dao.NewPostDAO(db)
+	publishedPostDAO := dao.NewPublishedPostDAO(db)
 	cmdable := ioc.NewRedis(cfg)
 	userCacheExpiration := ProvideUserCacheExpiration(cfg)
 	userCache := cache.NewUserCache(cmdable, userCacheExpiration)
-	userRepository := repository.NewUserRepository(userDAO, userCache)
-	userService := service.NewUserService(userRepository)
 	tokenBlacklist := cache.NewTokenBlacklist(cmdable)
-	jwtExpireTime := ProvideJWTExpireTime(cfg)
-	refreshExpireTime := ProvideRefreshExpireTime(cfg)
-	userHandler := web.NewUserHandler(userService, tokenBlacklist, jwtExpireTime, refreshExpireTime)
-	postDAO := dao.NewPostDAO(db)
-	postRepository := repository.NewPostRepository(postDAO)
-	publishedPostDAO := dao.NewPublishedPostDAO(db)
 	postCache := cache.NewPostCache(cmdable)
-	publishedPostRepository := repository.NewPublishedPostRepository(publishedPostDAO, postCache)
-	postService := service.NewPostService(postRepository, publishedPostRepository)
+	userRepository := repository.NewUserRepository(userDAO)
+	cachedUserRepository := repository.NewCachedUserRepository(userRepository, userCache)
+	postRepository := repository.NewPostRepository(postDAO)
+	publishedPostRepository := repository.NewPublishedPostRepository(publishedPostDAO)
+	cachedPublishedPostRepository := repository.NewCachedPublishedPostRepository(publishedPostRepository, postCache)
+	userService := service.NewUserService(cachedUserRepository)
+	postService := service.NewPostService(postRepository, cachedPublishedPostRepository)
+	jwtService := ioc.NewJWTService(cfg)
+	tokenService := ioc.NewTokenService(jwtService)
+	accessTokenVerifier := ioc.NewAccessTokenVerifier(jwtService)
+	accessExpireTime := ProvideAccessExpireTime(cfg)
+	refreshExpireTime := ProvideRefreshExpireTime(cfg)
+	authService := service.NewAuthService(tokenService, tokenBlacklist, accessExpireTime, refreshExpireTime)
+	userHandler := web.NewUserHandler(userService, authService)
 	postHandler := web.NewPostHandler(postService)
 	logger := ioc.NewLogger(cfg)
-	engine := ioc.NewGinEngine(cfg, userHandler, postHandler, logger)
+	engine := ioc.NewGinEngine(cfg, userHandler, postHandler, accessTokenVerifier, logger)
 	return engine
 }
 
-// wire.go:
-
-// ProvideUserCacheExpiration 提供用户缓存过期时间
+// ProvideUserCacheExpiration provides user cache expiration.
 func ProvideUserCacheExpiration(cfg *config.Config) cache.UserCacheExpiration {
 	return cache.UserCacheExpiration(cfg.Cache.UserExpiration)
 }
 
-// ProvideJWTExpireTime 提供 Access Token 过期时间
-func ProvideJWTExpireTime(cfg *config.Config) web.JWTExpireTime {
-	return web.JWTExpireTime(cfg.JWT.ExpireTime)
+// ProvideAccessExpireTime provides access token expiration.
+func ProvideAccessExpireTime(cfg *config.Config) time.Duration {
+	return cfg.JWT.ExpireTime
 }
 
-// ProvideRefreshExpireTime 提供 Refresh Token 过期时间
-func ProvideRefreshExpireTime(cfg *config.Config) web.RefreshExpireTime {
-	return web.RefreshExpireTime(cfg.JWT.RefreshExpireTime)
+// ProvideRefreshExpireTime provides refresh token expiration.
+func ProvideRefreshExpireTime(cfg *config.Config) time.Duration {
+	return cfg.JWT.RefreshExpireTime
 }

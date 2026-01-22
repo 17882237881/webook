@@ -220,39 +220,88 @@ err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(password))
 | **无运行时依赖** | 最终二进制无需 Wire 库 |
 
 ### 项目中的分层架构
+
+采用 **端口与适配器架构（六边形架构）** 设计，通过接口实现解耦：
+
 ```
-┌─────────────────────────────────────────┐
-│               Handler 层                 │  ← web.UserHandler
-├─────────────────────────────────────────┤
-│               Service 层                 │  ← service.UserService
-├─────────────────────────────────────────┤
-│             Repository 层                │  ← repository.UserRepository
-├───────────────────┬─────────────────────┤
-│     DAO 层        │      Cache 层        │
-│  (dao.UserDAO)    │  (cache.UserCache)  │
-├───────────────────┴─────────────────────┤
-│            基础设施层 (ioc)              │
-│         MySQL        │      Redis        │
-└─────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────┐
+│                      Handler 层 (web/)                       │
+│         UserHandler / PostHandler - HTTP 请求处理            │
+├─────────────────────────────────────────────────────────────┤
+│                     Service 层 (service/)                    │
+│    UserService / PostService / AuthService - 业务逻辑        │
+│              ↓ 依赖 ports 接口（依赖倒置）                    │
+├─────────────────────────────────────────────────────────────┤
+│                      Ports 层 (ports/)                       │
+│    定义接口契约：UserRepository, PostRepository,             │
+│    TokenService, UserCache, PostCache, TokenBlacklist       │
+├─────────────────────────────────────────────────────────────┤
+│                 Repository 层 (repository/)                  │
+│       实现 ports 接口，整合 DAO + Cache                       │
+│   CachedUserRepository / CachedPublishedPostRepository       │
+├───────────────────────┬─────────────────────────────────────┤
+│       DAO 层          │           Cache 层                   │
+│   (dao.UserDAO)       │   (cache.UserCache/PostCache)        │
+│   (dao.PostDAO)       │   (cache.TokenBlacklist)             │
+├───────────────────────┴─────────────────────────────────────┤
+│                     Infra 层 (infra/)                        │
+│              auth/jwt.go - JWT 实现 TokenService             │
+├─────────────────────────────────────────────────────────────┤
+│                       IOC 层 (ioc/)                          │
+│              依赖组装：MySQL / Redis / Logger                 │
+└─────────────────────────────────────────────────────────────┘
 ```
+
+**Ports 接口设计优势：**
+
+| 优势 | 说明 |
+|------|------|
+| **依赖倒置** | 高层模块依赖抽象（接口），不依赖具体实现 |
+| **可测试性** | 通过 Mock 接口实现纯单元测试 |
+| **可替换性** | 如需更换 JWT 库或缓存方案，只需实现新适配器 |
 
 ### 代码示例
 ```go
-// wire.go
+// cmd/webook/wire.go
 func InitWebServer(cfg *config.Config) *gin.Engine {
     wire.Build(
-        ioc.NewDB,                    // MySQL
-        ioc.NewRedis,                 // Redis
-        dao.NewUserDAO,               // DAO
-        ProvideUserCacheExpiration,   // Cache config
-        cache.NewUserCache,           // Cache
-        cache.NewTokenBlacklist,      // Token blacklist
-        repository.NewUserRepository, // Repository
-        service.NewUserService,       // Service
-        ProvideJWTExpireTime,         // JWT config
-        ProvideRefreshExpireTime,     // JWT config
-        web.NewUserHandler,           // Handler
-        ioc.NewGinEngine,             // Web Server
+        // 基础设施
+        ioc.NewDB,                              // MySQL
+        ioc.NewRedis,                           // Redis
+        ioc.NewLogger,                          // Logger
+        ioc.NewJWTService,                      // JWT 实现
+        ioc.NewTokenService,                    // TokenService 接口
+        ioc.NewAccessTokenVerifier,             // Token 验证器
+
+        // DAO 层
+        dao.NewUserDAO,
+        dao.NewPostDAO,
+        dao.NewPublishedPostDAO,
+
+        // Cache 层
+        ProvideUserCacheExpiration,
+        cache.NewUserCache,
+        cache.NewTokenBlacklist,
+        cache.NewPostCache,
+
+        // Repository 层 (实现 ports 接口)
+        repository.NewUserRepository,
+        repository.NewCachedUserRepository,     // 装饰器模式
+        repository.NewPostRepository,
+        repository.NewPublishedPostRepository,
+        repository.NewCachedPublishedPostRepository,
+
+        // Service 层
+        service.NewUserService,
+        service.NewPostService,
+        ProvideAccessExpireTime,
+        ProvideRefreshExpireTime,
+        service.NewAuthService,                 // 认证服务
+
+        // Handler 层
+        web.NewUserHandler,
+        web.NewPostHandler,
+        ioc.NewGinEngine,
     )
     return nil
 }
@@ -389,54 +438,77 @@ func TestUserService_Login(t *testing.T) {
 │                         Gin Web Server                           │
 │  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────────┐   │
 │  │   CORS      │  │   JWT       │  │     Router              │   │
-│  │ Middleware  │──│ Middleware  │──│  /users, /auth/*       │   │
+│  │ Middleware  │──│ Middleware  │──│ /users, /posts, /auth/* │   │
 │  └─────────────┘  └─────────────┘  └─────────────────────────┘   │
 └──────────────────────────────────────────────────────────────────┘
                                    │
                                    ▼
 ┌──────────────────────────────────────────────────────────────────┐
-│                       Handler 层 (web)                           │
-│              UserHandler - 处理 HTTP 请求                         │
+│                       Handler 层 (web/)                          │
+│       UserHandler / PostHandler - 处理 HTTP 请求                  │
 └──────────────────────────────────────────────────────────────────┘
                                    │
                                    ▼
 ┌──────────────────────────────────────────────────────────────────┐
-│                       Service 层 (service)                       │
-│              UserService - 业务逻辑处理                           │
-│              (密码加密/验证、业务规则)                              │
+│                       Service 层 (service/)                      │
+│        UserService - 用户业务   │  AuthService - 认证业务         │
+│        PostService - 帖子业务   │  (Token 生成/刷新/退出)          │
 └──────────────────────────────────────────────────────────────────┘
-                                   │
-                                   ▼
+                       │ 依赖 ports 接口
+                       ▼
 ┌──────────────────────────────────────────────────────────────────┐
-│                     Repository 层 (repository)                   │
-│              UserRepository - 数据访问抽象                        │
-│              (整合 DAO + Cache)                                  │
+│                       Ports 层 (ports/)                          │
+│  ┌─────────────────────────────────────────────────────────────┐ │
+│  │ UserRepository │ PostRepository │ PublishedPostRepository   │ │
+│  │ TokenService   │ AccessTokenVerifier                        │ │
+│  │ UserCache      │ PostCache      │ TokenBlacklist            │ │
+│  └─────────────────────────────────────────────────────────────┘ │
+└──────────────────────────────────────────────────────────────────┘
+                       │ 接口实现
+                       ▼
+┌──────────────────────────────────────────────────────────────────┐
+│                   Repository 层 (repository/)                    │
+│         ┌─ userRepository ←───────── ports.UserRepository        │
+│         ├─ cachedUserRepository (装饰器，增加缓存)                 │
+│         ├─ postRepository ←───────── ports.PostRepository        │
+│         └─ cachedPublishedPostRepository                         │
 └─────────────────────┬────────────────────────┬───────────────────┘
                       │                        │
-                      ▼                        ▼
-        ┌─────────────────────┐    ┌─────────────────────┐
-        │     DAO 层          │    │    Cache 层         │
-        │  UserDAO (GORM)    │    │  UserCache (Redis) │
-        │  Token Blacklist   │    │  Token Blacklist   │
-        └──────────┬──────────┘    └──────────┬──────────┘
-                   │                          │
-                   ▼                          ▼
-            ┌──────────┐              ┌──────────┐
-            │  MySQL   │              │  Redis   │
-            └──────────┘              └──────────┘
+          ┌───────────┴───────────┐  ┌─────────┴─────────┐
+          ▼                       ▼  ▼                   ▼
+┌─────────────────────┐    ┌─────────────────────┐ ┌─────────────────┐
+│     DAO 层          │    │    Cache 层         │ │   Infra 层      │
+│  UserDAO (GORM)     │    │  UserCache (Redis)  │ │ auth/jwt.go     │
+│  PostDAO            │    │  PostCache          │ │ ↳ JWTService    │
+│  PublishedPostDAO   │    │  TokenBlacklist     │ │   (实现 Token   │
+│                     │    │                     │ │    Service 接口) │
+└──────────┬──────────┘    └──────────┬──────────┘ └─────────────────┘
+           │                          │
+           ▼                          ▼
+    ┌──────────┐              ┌──────────┐
+    │  MySQL   │              │  Redis   │
+    └──────────┘              └──────────┘
 ```
 
 ---
 
 ## 总结
 
-本项目采用了**分层架构**设计，各层职责清晰：
+本项目采用了 **端口与适配器架构（六边形架构 / Clean Architecture）** 设计，各层职责清晰：
 
 | 层级 | 技术 | 职责 |
 |------|------|------|
 | Web 层 | Gin + CORS | HTTP 路由、中间件、参数验证 |
-| 认证层 | JWT | 用户身份认证、Token 管理 |
-| 业务层 | Go | 核心业务逻辑 |
-| 数据层 | GORM + MySQL | 数据持久化 |
-| 缓存层 | Redis | 高速缓存、Token 黑名单 |
-| 基础设施 | Wire | 依赖注入、组件组装 |
+| Service 层 | Go 接口 | 核心业务逻辑（UserService, PostService, AuthService） |
+| **Ports 层** | Go 接口 | **接口契约定义，实现依赖倒置** |
+| Repository 层 | Go 实现 | 实现 ports 接口，整合 DAO + Cache，支持装饰器模式 |
+| **Infra 层** | JWT 实现 | **基础设施实现（如 JWT Token 生成/验证）** |
+| DAO 层 | GORM + MySQL | 数据持久化 |
+| Cache 层 | Redis | 高速缓存、Token 黑名单 |
+| IOC 层 | Wire | 编译时依赖注入、组件组装 |
+
+**设计亮点：**
+- 通过 `ports` 包定义所有接口契约，实现 **依赖倒置原则 (DIP)**
+- 使用 **装饰器模式** 实现缓存层（如 `CachedUserRepository`）
+- `AuthService` 抽象认证逻辑，与 HTTP Handler 解耦
+- `infra/auth/jwt.go` 实现 `ports.TokenService` 接口，便于替换认证方案

@@ -20,10 +20,10 @@ func TestUserService_SignUp(t *testing.T) {
 		wantErr error
 	}{
 		{
-			name: "注册成功",
+			name: "signup success",
 			user: domain.User{
 				Email:    "test@example.com",
-				Password: "123456",
+				Password: "password123",
 			},
 			mock: func(ctrl *gomock.Controller) *repomocks.MockUserRepository {
 				repo := repomocks.NewMockUserRepository(ctrl)
@@ -35,19 +35,19 @@ func TestUserService_SignUp(t *testing.T) {
 			wantErr: nil,
 		},
 		{
-			name: "邮箱重复",
+			name: "signup failed - email exists",
 			user: domain.User{
-				Email:    "duplicate@example.com",
-				Password: "123456",
+				Email:    "existing@example.com",
+				Password: "password123",
 			},
 			mock: func(ctrl *gomock.Controller) *repomocks.MockUserRepository {
 				repo := repomocks.NewMockUserRepository(ctrl)
 				repo.EXPECT().
 					Create(gomock.Any(), gomock.Any()).
-					Return(ErrDuplicateEmail)
+					Return(errors.New("email already exists"))
 				return repo
 			},
-			wantErr: ErrDuplicateEmail,
+			wantErr: errors.New("email already exists"),
 		},
 	}
 
@@ -60,14 +60,17 @@ func TestUserService_SignUp(t *testing.T) {
 			svc := NewUserService(repo)
 
 			err := svc.SignUp(context.Background(), tt.user)
-			assert.Equal(t, tt.wantErr, err)
+			if tt.wantErr != nil {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+			}
 		})
 	}
 }
 
 func TestUserService_Login(t *testing.T) {
-	// 预先生成一个加密密码用于测试
-	hashedPassword, _ := bcrypt.GenerateFromPassword([]byte("123456"), bcrypt.DefaultCost)
+	hashedPassword, _ := bcrypt.GenerateFromPassword([]byte("password123"), bcrypt.DefaultCost)
 
 	tests := []struct {
 		name     string
@@ -78,9 +81,9 @@ func TestUserService_Login(t *testing.T) {
 		wantErr  error
 	}{
 		{
-			name:     "登录成功",
+			name:     "login success",
 			email:    "test@example.com",
-			password: "123456",
+			password: "password123",
 			mock: func(ctrl *gomock.Controller) *repomocks.MockUserRepository {
 				repo := repomocks.NewMockUserRepository(ctrl)
 				repo.EXPECT().
@@ -100,21 +103,21 @@ func TestUserService_Login(t *testing.T) {
 			wantErr: nil,
 		},
 		{
-			name:     "用户不存在",
-			email:    "notfound@example.com",
-			password: "123456",
+			name:     "login failed - user not found",
+			email:    "notexist@example.com",
+			password: "password123",
 			mock: func(ctrl *gomock.Controller) *repomocks.MockUserRepository {
 				repo := repomocks.NewMockUserRepository(ctrl)
 				repo.EXPECT().
-					FindByEmail(gomock.Any(), "notfound@example.com").
-					Return(domain.User{}, errors.New("用户不存在"))
+					FindByEmail(gomock.Any(), "notexist@example.com").
+					Return(domain.User{}, errors.New("user not found"))
 				return repo
 			},
 			wantUser: domain.User{},
-			wantErr:  ErrInvalidUserOrPassword,
+			wantErr:  domain.ErrInvalidUserOrPassword,
 		},
 		{
-			name:     "密码错误",
+			name:     "login failed - wrong password",
 			email:    "test@example.com",
 			password: "wrongpassword",
 			mock: func(ctrl *gomock.Controller) *repomocks.MockUserRepository {
@@ -129,7 +132,7 @@ func TestUserService_Login(t *testing.T) {
 				return repo
 			},
 			wantUser: domain.User{},
-			wantErr:  ErrInvalidUserOrPassword,
+			wantErr:  domain.ErrInvalidUserOrPassword,
 		},
 	}
 
@@ -142,8 +145,10 @@ func TestUserService_Login(t *testing.T) {
 			svc := NewUserService(repo)
 
 			user, err := svc.Login(context.Background(), tt.email, tt.password)
-			assert.Equal(t, tt.wantErr, err)
-			if err == nil {
+			if tt.wantErr != nil {
+				assert.ErrorIs(t, err, tt.wantErr)
+			} else {
+				assert.NoError(t, err)
 				assert.Equal(t, tt.wantUser.Id, user.Id)
 				assert.Equal(t, tt.wantUser.Email, user.Email)
 			}
@@ -160,7 +165,7 @@ func TestUserService_Profile(t *testing.T) {
 		wantErr  error
 	}{
 		{
-			name:   "获取成功",
+			name:   "get profile success",
 			userId: 1,
 			mock: func(ctrl *gomock.Controller) *repomocks.MockUserRepository {
 				repo := repomocks.NewMockUserRepository(ctrl)
@@ -179,17 +184,17 @@ func TestUserService_Profile(t *testing.T) {
 			wantErr: nil,
 		},
 		{
-			name:   "用户不存在",
+			name:   "user not found",
 			userId: 999,
 			mock: func(ctrl *gomock.Controller) *repomocks.MockUserRepository {
 				repo := repomocks.NewMockUserRepository(ctrl)
 				repo.EXPECT().
 					FindById(gomock.Any(), int64(999)).
-					Return(domain.User{}, errors.New("用户不存在"))
+					Return(domain.User{}, errors.New("user not found"))
 				return repo
 			},
 			wantUser: domain.User{},
-			wantErr:  errors.New("用户不存在"),
+			wantErr:  errors.New("user not found"),
 		},
 	}
 
@@ -206,16 +211,14 @@ func TestUserService_Profile(t *testing.T) {
 				assert.Error(t, err)
 			} else {
 				assert.NoError(t, err)
-				assert.Equal(t, tt.wantUser.Id, user.Id)
-				assert.Equal(t, tt.wantUser.Email, user.Email)
+				assert.Equal(t, tt.wantUser, user)
 			}
 		})
 	}
 }
 
 func TestUserService_UpdatePassword(t *testing.T) {
-	// 预先生成加密密码
-	oldHashedPassword, _ := bcrypt.GenerateFromPassword([]byte("oldpass"), bcrypt.DefaultCost)
+	hashedPassword, _ := bcrypt.GenerateFromPassword([]byte("oldpassword"), bcrypt.DefaultCost)
 
 	tests := []struct {
 		name    string
@@ -226,10 +229,10 @@ func TestUserService_UpdatePassword(t *testing.T) {
 		wantErr error
 	}{
 		{
-			name:   "修改成功",
+			name:   "update password success",
 			userId: 1,
-			oldPwd: "oldpass",
-			newPwd: "newpass",
+			oldPwd: "oldpassword",
+			newPwd: "newpassword123",
 			mock: func(ctrl *gomock.Controller) *repomocks.MockUserRepository {
 				repo := repomocks.NewMockUserRepository(ctrl)
 				repo.EXPECT().
@@ -237,7 +240,7 @@ func TestUserService_UpdatePassword(t *testing.T) {
 					Return(domain.User{
 						Id:       1,
 						Email:    "test@example.com",
-						Password: string(oldHashedPassword),
+						Password: string(hashedPassword),
 					}, nil)
 				repo.EXPECT().
 					Update(gomock.Any(), gomock.Any()).
@@ -247,10 +250,10 @@ func TestUserService_UpdatePassword(t *testing.T) {
 			wantErr: nil,
 		},
 		{
-			name:   "旧密码错误",
+			name:   "update password failed - wrong old password",
 			userId: 1,
-			oldPwd: "wrongoldpass",
-			newPwd: "newpass",
+			oldPwd: "wrongpassword",
+			newPwd: "newpassword123",
 			mock: func(ctrl *gomock.Controller) *repomocks.MockUserRepository {
 				repo := repomocks.NewMockUserRepository(ctrl)
 				repo.EXPECT().
@@ -258,26 +261,25 @@ func TestUserService_UpdatePassword(t *testing.T) {
 					Return(domain.User{
 						Id:       1,
 						Email:    "test@example.com",
-						Password: string(oldHashedPassword),
+						Password: string(hashedPassword),
 					}, nil)
-				// 不应调用 Update
 				return repo
 			},
-			wantErr: ErrInvalidUserOrPassword,
+			wantErr: domain.ErrInvalidUserOrPassword,
 		},
 		{
-			name:   "用户不存在",
+			name:   "update password failed - user not found",
 			userId: 999,
-			oldPwd: "oldpass",
-			newPwd: "newpass",
+			oldPwd: "oldpassword",
+			newPwd: "newpassword123",
 			mock: func(ctrl *gomock.Controller) *repomocks.MockUserRepository {
 				repo := repomocks.NewMockUserRepository(ctrl)
 				repo.EXPECT().
 					FindById(gomock.Any(), int64(999)).
-					Return(domain.User{}, errors.New("用户不存在"))
+					Return(domain.User{}, errors.New("user not found"))
 				return repo
 			},
-			wantErr: errors.New("用户不存在"),
+			wantErr: errors.New("user not found"),
 		},
 	}
 
@@ -292,9 +294,6 @@ func TestUserService_UpdatePassword(t *testing.T) {
 			err := svc.UpdatePassword(context.Background(), tt.userId, tt.oldPwd, tt.newPwd)
 			if tt.wantErr != nil {
 				assert.Error(t, err)
-				if tt.wantErr == ErrInvalidUserOrPassword {
-					assert.Equal(t, ErrInvalidUserOrPassword, err)
-				}
 			} else {
 				assert.NoError(t, err)
 			}

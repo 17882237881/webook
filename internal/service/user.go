@@ -2,20 +2,13 @@ package service
 
 import (
 	"context"
-	"errors"
 	"webook/internal/domain"
-	"webook/internal/repository"
-	"webook/internal/repository/dao"
+	"webook/internal/ports"
 
 	"golang.org/x/crypto/bcrypt"
 )
 
-var (
-	ErrInvalidUserOrPassword = errors.New("邮箱或密码不正确")
-	ErrDuplicateEmail        = dao.ErrDuplicateEmail
-)
-
-// UserService 用户服务接口
+// UserService defines user use cases.
 type UserService interface {
 	SignUp(ctx context.Context, u domain.User) error
 	Login(ctx context.Context, email, password string) (domain.User, error)
@@ -23,20 +16,17 @@ type UserService interface {
 	UpdatePassword(ctx context.Context, id int64, oldPwd, newPwd string) error
 }
 
-// userService 用户服务实现
 type userService struct {
-	repo repository.UserRepository
+	repo ports.UserRepository
 }
 
-// NewUserService 创建用户服务实例
-func NewUserService(repo repository.UserRepository) UserService {
+func NewUserService(repo ports.UserRepository) UserService {
 	return &userService{
 		repo: repo,
 	}
 }
 
 func (svc *userService) SignUp(ctx context.Context, u domain.User) error {
-	// 使用 bcrypt 加密密码
 	hash, err := bcrypt.GenerateFromPassword([]byte(u.Password), bcrypt.DefaultCost)
 	if err != nil {
 		return err
@@ -48,12 +38,12 @@ func (svc *userService) SignUp(ctx context.Context, u domain.User) error {
 func (svc *userService) Login(ctx context.Context, email, password string) (domain.User, error) {
 	u, err := svc.repo.FindByEmail(ctx, email)
 	if err != nil {
-		return domain.User{}, ErrInvalidUserOrPassword
+		return domain.User{}, domain.ErrInvalidUserOrPassword
 	}
-	// 使用 bcrypt 比较密码
+
 	err = bcrypt.CompareHashAndPassword([]byte(u.Password), []byte(password))
 	if err != nil {
-		return domain.User{}, ErrInvalidUserOrPassword
+		return domain.User{}, domain.ErrInvalidUserOrPassword
 	}
 	return u, nil
 }
@@ -67,12 +57,12 @@ func (svc *userService) UpdatePassword(ctx context.Context, id int64, oldPwd, ne
 	if err != nil {
 		return err
 	}
-	// 验证旧密码
+
 	err = bcrypt.CompareHashAndPassword([]byte(u.Password), []byte(oldPwd))
 	if err != nil {
-		return ErrInvalidUserOrPassword
+		return domain.ErrInvalidUserOrPassword
 	}
-	// 加密新密码
+
 	hash, err := bcrypt.GenerateFromPassword([]byte(newPwd), bcrypt.DefaultCost)
 	if err != nil {
 		return err

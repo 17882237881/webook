@@ -18,6 +18,26 @@
 | 功能 | 接口 | 说明 |
 |------|------|------|
 | 用户注册 | `POST /users` | 邮箱 + 密码注册 |
+# Webook 用户登录注册功能实现文档
+
+## 目录
+
+1. [功能概述](#功能概述)
+2. [架构设计](#架构设计)
+3. [核心功能实现](#核心功能实现)
+4. [遇到的问题与解决方案](#遇到的问题与解决方案)
+5. [安全增强](#安全增强)
+6. [API 接口文档](#api-接口文档)
+
+---
+
+## 功能概述
+
+本模块实现了完整的用户认证系统，包括：
+
+| 功能 | 接口 | 说明 |
+|------|------|------|
+| 用户注册 | `POST /users` | 邮箱 + 密码注册 |
 | 用户登录 | `POST /users/login` | 返回 JWT Token |
 | 获取用户信息 | `GET /users/:id` | 需要登录 |
 | 修改密码 | `PUT /users/:id/password` | 需要登录 |
@@ -26,7 +46,7 @@
 
 ## 架构设计
 
-采用 **分层架构**，实现关注点分离：
+采用 **端口与适配器架构（六边形架构）**，通过接口实现关注点分离：
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -37,20 +57,29 @@
                               ↓ 调用接口
 ┌─────────────────────────────────────────────────────────────┐
 │                    Service 层 (service/)                     │
-│  负责：业务逻辑、密码加密、业务错误定义                         │
-│  文件：internal/service/user.go                               │
+│  UserService - 用户业务逻辑（密码加密、登录验证）                  │
+│  AuthService - 认证服务（Token 生成/刷新/退出）                 │
+│  文件：internal/service/user.go, auth.go                     │
 └─────────────────────────────────────────────────────────────┘
-                              ↓ 调用接口
+                              ↓ 依赖 ports 接口
 ┌─────────────────────────────────────────────────────────────┐
-│                  Repository 层 (repository/)                 │
-│  负责：数据持久化、缓存管理、领域对象转换                       │
-│  文件：internal/repository/user.go                            │
+│                      Ports 层 (ports/)                       │
+│  定义接口契约：UserRepository, TokenService,                    │
+│  UserCache, TokenBlacklist, AccessTokenVerifier              │
+│  文件：internal/ports/*.go                                    │
 └─────────────────────────────────────────────────────────────┘
+                    ↓ 实现                    ↓ 实现
+┌────────────────────────────┐    ┌────────────────────────────┐
+│  Repository 层             │    │      Infra 层               │
+│  实现 ports.UserRepository  │    │  实现 ports.TokenService     │
+│  装饰器: CachedUserRepo     │    │  文件: infra/auth/jwt.go     │
+│  文件: repository/user.go  │    └────────────────────────────┘
+└────────────────────────────┘
                     ↓ 调用                    ↓ 调用
 ┌────────────────────────────┐    ┌────────────────────────────┐
-│       DAO 层 (dao/)         │    │     Cache 层 (cache/)       │
-│  负责：数据库操作、SQL 执行   │    │  负责：Redis 缓存操作        │
-│  文件：dao/user.go           │    │  文件：cache/user.go         │
+│       DAO 层               │    │     Cache 层               │
+│  数据库操作、SQL 执行          │    │  Redis 缓存操作            │
+│  文件: dao/user.go         │    │  文件: cache/user.go        │
 └────────────────────────────┘    └────────────────────────────┘
 ```
 
@@ -58,9 +87,10 @@
 
 | 优势 | 说明 |
 |------|------|
-| **可测试性** | 每层都依赖接口，便于 Mock 测试 |
+| **依赖倒置** | Service 层依赖 ports 接口，不依赖具体实现 |
+| **可测试性** | 通过 Mock 接口实现纯单元测试 |
 | **可维护性** | 修改一层不影响其他层 |
-| **可扩展性** | 如需换数据库，只改 DAO 层 |
+| **可替换性** | 如需换 JWT 库，只需实现新的 `TokenService` 适配器 |
 
 ### 依赖注入 (Wire)
 
@@ -74,25 +104,42 @@ config.Load → ioc.NewDB → dao.NewUserDAO → repository.NewUserRepository �
             ioc.NewRedis → cache.NewUserCache ──────────┘
 ```
 
-**Wire 配置 (`wire.go`):**
+**Wire 配置 (`cmd/webook/wire.go`):**
 
 ```go
 //go:build wireinject
 
 func InitWebServer(cfg *config.Config) *gin.Engine {
     wire.Build(
-        ioc.NewDB,                // 数据库
-        ioc.NewRedis,             // Redis
-        dao.NewUserDAO,           // DAO 层
-        ProvideUserCacheExpiration,   // Cache 配置
-        cache.NewUserCache,       // Cache 层
-        cache.NewTokenBlacklist,      // Token 黑名单
-        repository.NewUserRepository, // Repository 层
-        service.NewUserService,   // Service 层
-        ProvideJWTExpireTime,         // JWT 配置
-        ProvideRefreshExpireTime,     // JWT 配置
-        web.NewUserHandler,       // Handler 层
-        ioc.NewGinEngine,         // Web 引擎
+        // 基础设施
+        ioc.NewDB,                    // 数据库
+        ioc.NewRedis,                 // Redis
+        ioc.NewLogger,                // 日志
+        ioc.NewJWTService,            // JWT 实现
+        ioc.NewTokenService,          // TokenService 接口
+        ioc.NewAccessTokenVerifier,   // Token 验证器
+
+        // DAO 层
+        dao.NewUserDAO,
+
+        // Cache 层
+        ProvideUserCacheExpiration,
+        cache.NewUserCache,
+        cache.NewTokenBlacklist,
+
+        // Repository 层 (实现 ports 接口)
+        repository.NewUserRepository,
+        repository.NewCachedUserRepository,  // 装饰器模式
+
+        // Service 层
+        service.NewUserService,
+        ProvideAccessExpireTime,
+        ProvideRefreshExpireTime,
+        service.NewAuthService,       // 认证服务
+
+        // Handler 层
+        web.NewUserHandler,
+        ioc.NewGinEngine,
     )
     return nil
 }
@@ -250,18 +297,32 @@ POST /auth/logout
 4. 后续使用该 Refresh Token 刷新时被拒绝
 ```
 
-**实现代码：**
+**实现代码（基于 AuthService 抽象）：**
 
 ```go
-// POST /auth/logout
-func (u *UserHandler) Logout(c *gin.Context) {
+// internal/service/auth.go
+func (a *authService) Logout(ctx context.Context, refreshToken string) error {
     // 1. 解析 Refresh Token 获取 SSid
-    claims, _ := middleware.ParseRefreshToken(req.RefreshToken)
-    
+    claims, err := a.tokens.ParseRefreshToken(refreshToken)
+    if err != nil {
+        return nil
+    }
     // 2. 将 SSid 加入 Redis 黑名单
-    u.blacklist.Add(ctx, claims.SSid, u.refreshExpireTime)
-    
-    ginx.SuccessMsg(c, "退出成功")
+    return a.blacklist.Add(ctx, claims.SSid, a.refreshExpire)
+}
+
+// internal/web/user.go
+func (u *UserHandler) Logout(c *gin.Context) {
+    var req LogoutReq
+    if err := c.ShouldBindJSON(&req); err != nil {
+        ginx.Error(c, ginx.CodeInvalidParams, "invalid params")
+        return
+    }
+    if err := u.auth.Logout(c.Request.Context(), req.RefreshToken); err != nil {
+        ginx.Error(c, ginx.CodeInternalError, "logout failed")
+        return
+    }
+    ginx.SuccessMsg(c, "logout success")
 }
 ```
 
@@ -583,15 +644,15 @@ webook/
 
 本模块实现了一个安全、可扩展的用户认证系统：
 
-1. **分层架构**：Handler → Service → Repository → DAO/Cache
-2. **Wire 依赖注入**：编译时代码生成，零运行时开销
-3. **安全设计**：bcrypt 密码加密、JWT Token、User-Agent 绑定
-4. **性能优化**：Redis 缓存用户信息，减少数据库查询
-5. **统一规范**：RESTful API、统一响应格式、错误码体系
+1. **端口与适配器架构**：Handler → Service → Ports(接口) → Repository/Infra
+2. **AuthService 抽象**：Token 生成/刷新/退出逻辑与 Handler 解耦
+3. **Wire 依赖注入**：编译时代码生成，零运行时开销
+4. **安全设计**：bcrypt 密码加密、JWT Token、User-Agent 绑定
+5. **性能优化**：Redis 缓存用户信息，装饰器模式实现缓存层
+6. **统一规范**：RESTful API、统一响应格式、错误码体系
 
 下一步可扩展：
 - 短信/邮箱验证码登录
 - OAuth 第三方登录
-- Token 刷新机制
 - 登录日志审计
 - 登录接口缓存优化（email → userId 索引）

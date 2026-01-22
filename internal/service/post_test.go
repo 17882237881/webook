@@ -204,11 +204,11 @@ func TestPostService_GetPublishedById(t *testing.T) {
 				pubRepo := repomocks.NewMockPublishedPostRepository(ctrl)
 				pubRepo.EXPECT().
 					FindById(gomock.Any(), int64(999)).
-					Return(domain.Post{}, ErrPostNotFound)
+					Return(domain.Post{}, domain.ErrPostNotFound)
 				return repo, pubRepo
 			},
 			wantPost: domain.Post{},
-			wantErr:  ErrPostNotFound,
+			wantErr:  domain.ErrPostNotFound,
 		},
 	}
 
@@ -331,10 +331,10 @@ func TestPostService_Delete(t *testing.T) {
 				pubRepo := repomocks.NewMockPublishedPostRepository(ctrl)
 				repo.EXPECT().
 					SyncStatus(gomock.Any(), int64(1), int64(2), domain.PostStatusPrivate).
-					Return(ErrPostNotAuthor)
+					Return(domain.ErrPostNotAuthor)
 				return repo, pubRepo
 			},
-			wantErr: ErrPostNotAuthor,
+			wantErr: domain.ErrPostNotAuthor,
 		},
 	}
 
