@@ -32,7 +32,15 @@ func InitWebServer(cfg *config.Config) *gin.Engine {
 	jwtExpireTime := ProvideJWTExpireTime(cfg)
 	refreshExpireTime := ProvideRefreshExpireTime(cfg)
 	userHandler := web.NewUserHandler(userService, tokenBlacklist, jwtExpireTime, refreshExpireTime)
-	engine := ioc.NewGinEngine(cfg, userHandler)
+	postDAO := dao.NewPostDAO(db)
+	postRepository := repository.NewPostRepository(postDAO)
+	publishedPostDAO := dao.NewPublishedPostDAO(db)
+	postCache := cache.NewPostCache(cmdable)
+	publishedPostRepository := repository.NewPublishedPostRepository(publishedPostDAO, postCache)
+	postService := service.NewPostService(postRepository, publishedPostRepository)
+	postHandler := web.NewPostHandler(postService)
+	logger := ioc.NewLogger(cfg)
+	engine := ioc.NewGinEngine(cfg, userHandler, postHandler, logger)
 	return engine
 }
 

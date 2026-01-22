@@ -1,39 +1,62 @@
 <template>
-  <div class="profile-container">
-    <div class="profile-card">
-      <h1>👤 用户信息</h1>
-      
-      <div class="info-section">
-        <div class="info-item">
-          <span class="label">用户ID</span>
-          <span class="value">{{ userId }}</span>
-        </div>
-        <div class="info-item">
-          <span class="label">邮箱</span>
-          <span class="value">{{ email }}</span>
-        </div>
-      </div>
+  <div class="profile-page">
+    <div class="profile-container stagger-1">
+      <header class="page-header">
+         <h1 class="page-title">Personal Profile</h1>
+         <button class="btn btn-secondary btn-sm" @click="goBack">← Back to Editorial</button>
+      </header>
 
-      <hr />
+      <div class="profile-card card">
+        <div class="profile-header">
+          <div class="avatar-placeholder">{{ email ? email[0].toUpperCase() : 'U' }}</div>
+          <h2 class="user-email">{{ email }}</h2>
+          <span class="user-id">User ID: {{ userId }}</span>
+        </div>
 
-      <h2>🔐 修改密码</h2>
-      <form @submit.prevent="handleUpdatePassword">
-        <div class="form-group">
-          <label>旧密码</label>
-          <input v-model="passwordForm.oldPassword" type="password" placeholder="请输入旧密码" required />
+        <div class="divider"></div>
+
+        <div class="settings-section">
+          <h3>Security Settings</h3>
+          
+          <form @submit.prevent="handleUpdatePassword" class="settings-form">
+             <div class="form-group">
+              <label class="form-label">Current Password</label>
+              <input 
+                v-model="passwordForm.oldPassword" 
+                type="password" 
+                class="input-text"
+                placeholder="Enter current password" 
+                required 
+              />
+            </div>
+            
+             <div class="form-group">
+              <label class="form-label">New Password</label>
+              <input 
+                v-model="passwordForm.newPassword" 
+                type="password" 
+                class="input-text"
+                placeholder="Enter new password" 
+                required 
+              />
+            </div>
+
+            <div class="form-actions">
+              <button type="submit" class="btn btn-primary" :disabled="loading">
+                {{ loading ? 'Updating...' : 'Update Password' }}
+              </button>
+            </div>
+
+            <p v-if="message" :class="['message', messageType]">{{ message }}</p>
+          </form>
         </div>
-        <div class="form-group">
-          <label>新密码</label>
-          <input v-model="passwordForm.newPassword" type="password" placeholder="6-16位新密码" required />
-        </div>
-        <button type="submit" class="btn-primary" :disabled="loading">
-          {{ loading ? '修改中...' : '修改密码' }}
+
+        <div class="divider"></div>
+
+        <button @click="handleLogout" class="btn btn-secondary btn-block text-error">
+          Sign Out
         </button>
-      </form>
-
-      <p v-if="message" :class="['message', messageType]">{{ message }}</p>
-
-      <button @click="handleLogout" class="btn-logout">退出登录</button>
+      </div>
     </div>
   </div>
 </template>
@@ -61,10 +84,10 @@ onMounted(async () => {
     if (res.code === 0) {
       email.value = res.data.email
     } else {
-      message.value = res.msg || '获取信息失败'
+      message.value = res.msg || 'Failed to load profile'
     }
   } catch (e) {
-    message.value = '网络错误'
+    message.value = 'Network error'
   }
 })
 
@@ -78,15 +101,15 @@ async function handleUpdatePassword() {
       passwordForm.value.newPassword
     )
     if (res.code === 0) {
-      message.value = '密码修改成功'
+      message.value = 'Password updated successfully'
       messageType.value = 'success'
       passwordForm.value = { oldPassword: '', newPassword: '' }
     } else {
-      message.value = res.msg || '修改失败'
+      message.value = res.msg || 'Update failed'
       messageType.value = 'error'
     }
   } catch (e) {
-    message.value = '网络错误'
+    message.value = 'Network error'
     messageType.value = 'error'
   }
   loading.value = false
@@ -97,144 +120,129 @@ function handleLogout() {
   localStorage.removeItem('userId')
   router.push('/')
 }
+
+function goBack() {
+  router.push('/posts')
+}
 </script>
 
 <style scoped>
-.profile-container {
+.profile-page {
   min-height: 100vh;
+  background: var(--color-bg-primary);
+  padding: var(--space-2xl) var(--space-md);
   display: flex;
-  align-items: center;
   justify-content: center;
-  background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
+}
+
+.profile-container {
+  width: 100%;
+  max-width: 500px;
+}
+
+.page-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: var(--space-xl);
+}
+
+.page-title {
+  font-size: 2rem;
+  margin: 0;
 }
 
 .profile-card {
-  background: rgba(255, 255, 255, 0.95);
-  backdrop-filter: blur(10px);
-  border-radius: 20px;
-  padding: 40px;
-  width: 450px;
-  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+  padding: var(--space-2xl);
 }
 
-h1 {
-  text-align: center;
-  color: #11998e;
-  margin-bottom: 30px;
-}
-
-h2 {
-  color: #333;
-  margin: 20px 0;
-}
-
-hr {
-  border: none;
-  border-top: 1px solid #eee;
-  margin: 25px 0;
-}
-
-.info-section {
-  background: #f8f9fa;
-  border-radius: 12px;
-  padding: 20px;
-}
-
-.info-item {
+.profile-header {
   display: flex;
-  justify-content: space-between;
-  padding: 10px 0;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  margin-bottom: var(--space-xl);
 }
 
-.info-item .label {
-  color: #666;
-}
-
-.info-item .value {
-  color: #333;
+.avatar-placeholder {
+  width: 80px;
+  height: 80px;
+  background: var(--color-accent-primary);
+  color: white;
+  font-family: var(--font-display);
+  font-size: 2.5rem;
   font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  margin-bottom: var(--space-md);
+  box-shadow: var(--shadow-md);
+}
+
+.user-email {
+  font-size: 1.25rem;
+  margin-bottom: var(--space-xs);
+}
+
+.user-id {
+  font-family: var(--font-body);
+  font-size: 0.9rem;
+  color: var(--color-text-muted);
+}
+
+.divider {
+  height: 1px;
+  background: var(--color-border-light);
+  margin: var(--space-xl) 0;
+}
+
+.settings-section h3 {
+  font-size: 1.1rem;
+  margin-bottom: var(--space-lg);
+  color: var(--color-text-primary);
+}
+
+.settings-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-lg);
 }
 
 .form-group {
-  margin-bottom: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
 }
 
-.form-group label {
-  display: block;
-  margin-bottom: 8px;
-  color: #555;
+.form-label {
+  font-size: 0.85rem;
   font-weight: 500;
+  color: var(--color-text-secondary);
 }
 
-.form-group input {
+.btn-block {
   width: 100%;
-  padding: 12px 16px;
-  border: 2px solid #e0e0e0;
-  border-radius: 10px;
-  font-size: 14px;
-  transition: border-color 0.3s;
-  box-sizing: border-box;
 }
 
-.form-group input:focus {
-  outline: none;
-  border-color: #11998e;
-}
-
-.btn-primary {
-  width: 100%;
-  padding: 14px;
-  background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
-  color: white;
-  border: none;
-  border-radius: 10px;
-  font-size: 16px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: transform 0.2s, box-shadow 0.2s;
-}
-
-.btn-primary:hover:not(:disabled) {
-  transform: translateY(-2px);
-  box-shadow: 0 10px 20px rgba(17, 153, 142, 0.4);
-}
-
-.btn-primary:disabled {
-  opacity: 0.7;
-  cursor: not-allowed;
-}
-
-.btn-logout {
-  width: 100%;
-  padding: 14px;
-  background: #f5f5f5;
-  color: #666;
-  border: none;
-  border-radius: 10px;
-  font-size: 16px;
-  cursor: pointer;
-  margin-top: 15px;
-  transition: background 0.3s;
-}
-
-.btn-logout:hover {
-  background: #eee;
+.text-error {
+  color: var(--color-error);
 }
 
 .message {
+  padding: var(--space-sm);
+  border-radius: var(--radius-sm);
   text-align: center;
-  padding: 10px;
-  border-radius: 8px;
-  margin-top: 15px;
-}
-
-.message.error {
-  background: #fee;
-  color: #c00;
+  font-size: 0.9rem;
 }
 
 .message.success {
-  background: #efe;
-  color: #060;
+  background: var(--color-success-light);
+  color: var(--color-success);
+}
+
+.message.error {
+  background: var(--color-error-light);
+  color: var(--color-error);
 }
 </style>

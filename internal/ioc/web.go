@@ -4,17 +4,23 @@ import (
 	"webook/config"
 	"webook/internal/web"
 	"webook/internal/web/middleware"
+	"webook/pkg/logger"
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 )
 
 // NewGinEngine 创建并配置 Gin 引擎
-func NewGinEngine(cfg *config.Config, userHandler *web.UserHandler) *gin.Engine {
+func NewGinEngine(cfg *config.Config, userHandler *web.UserHandler, postHandler *web.PostHandler, l logger.Logger) *gin.Engine {
 	server := gin.Default()
 
 	// 初始化 JWT
 	middleware.InitJWT(cfg.JWT.SecretKey)
+
+	// 请求日志中间件（最先添加，记录所有请求）
+	server.Use(middleware.NewRequestLoggerBuilder(l).
+		IgnorePath("/health"). // 健康检查不记录
+		Build())
 
 	// CORS 中间件配置
 	server.Use(cors.New(cors.Config{
@@ -36,6 +42,7 @@ func NewGinEngine(cfg *config.Config, userHandler *web.UserHandler) *gin.Engine 
 
 	// 注册路由
 	userHandler.RegisterRoutes(server)
+	postHandler.RegisterRoutes(server)
 
 	return server
 }

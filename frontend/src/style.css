@@ -1,12 +1,334 @@
-/* 重置默认样式 */
-* {
+/*
+ * ═══════════════════════════════════════════════════════════════════════════
+ * WEBOOK DESIGN SYSTEM - "Anthropic Editorial" Theme
+ * ═══════════════════════════════════════════════════════════════════════════
+ * 
+ * Style: Editorial/Magazine - Sophisticated, clean, typography-led
+ * Fonts: Poppins (headings) + Lora (body)
+ * Palette: Organic warm neutrals with strategic accents
+ */
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   FONT IMPORTS
+   ═══════════════════════════════════════════════════════════════════════════ */
+@import url('https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500&family=Poppins:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&display=swap');
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   CSS CUSTOM PROPERTIES (Design Tokens)
+   ═══════════════════════════════════════════════════════════════════════════ */
+:root {
+  /* ─── Typography ─────────────────────────────────────────────────────────── */
+  --font-display: 'Poppins', sans-serif;
+  --font-body: 'Lora', serif;
+
+  /* ─── Color Palette (Anthropic Brand) ────────────────────────────────────── */
+  /* Base Canvas */
+  --color-bg-primary: #faf9f5;
+  /* Warm Light */
+  --color-bg-secondary: #f2efe9;
+  /* Muted Cream */
+  --color-bg-tertiary: #e8e6dc;
+  /* Light Gray */
+  --color-bg-elevated: #ffffff;
+  /* Pure White */
+
+  /* Text */
+  --color-text-primary: #141413;
+  /* Dark / Near Black */
+  --color-text-secondary: #4a4a4a;
+  /* Dark Gray */
+  --color-text-muted: #b0aea5;
+  /* Mid Gray */
+  --color-text-inverse: #faf9f5;
+  /* Light Text */
+
+  /* Accent Colors */
+  --color-accent-primary: #d97757;
+  /* Anthropic Orange */
+  --color-accent-hover: #c4664a;
+  /* Darker Orange */
+  --color-accent-light: #fbeee8;
+  /* Light Orange Tint */
+
+  --color-accent-blue: #6a9bcc;
+  /* Secondary Accent Blue */
+  --color-accent-green: #788c5d;
+  /* Tertiary Accent Green */
+
+  /* Semantic Colors */
+  --color-success: #788c5d;
+  /* Using Brand Green */
+  --color-success-light: #edf2e9;
+  --color-warning: #d4a72c;
+  /* Golden */
+  --color-warning-light: #fbf6e0;
+  --color-error: #cc5050;
+  /* Soft Red */
+  --color-error-light: #f9e6e6;
+
+  /* Borders & Dividers */
+  --color-border: #dcd9d0;
+  --color-border-light: #e8e6dc;
+  --color-divider: #dcd9d0;
+
+  /* ─── Spacing Scale ──────────────────────────────────────────────────────── */
+  --space-xs: 0.25rem;
+  /* 4px */
+  --space-sm: 0.5rem;
+  /* 8px */
+  --space-md: 1rem;
+  /* 16px */
+  --space-lg: 1.5rem;
+  /* 24px */
+  --space-xl: 2rem;
+  /* 32px */
+  --space-2xl: 3rem;
+  /* 48px */
+  --space-3xl: 4rem;
+  /* 64px */
+  --space-4xl: 6rem;
+  /* 96px */
+
+  /* ─── Border Radius ──────────────────────────────────────────────────────── */
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 24px;
+  --radius-full: 9999px;
+
+  /* ─── Shadows ────────────────────────────────────────────────────────────── */
+  --shadow-sm: 0 1px 2px rgba(20, 20, 19, 0.04);
+  --shadow-md: 0 4px 12px rgba(20, 20, 19, 0.05);
+  --shadow-lg: 0 12px 32px rgba(20, 20, 19, 0.06);
+  --shadow-xl: 0 20px 48px rgba(20, 20, 19, 0.08);
+
+  /* ─── Flows ──────────────────────────────────────────────────────────────── */
+  --bezier-smooth: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   GLOBAL RESET & BASE STYLES
+   ═══════════════════════════════════════════════════════════════════════════ */
+*,
+*::before,
+*::after {
   margin: 0;
   padding: 0;
   box-sizing: border-box;
 }
 
-body {
-  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+html {
+  font-size: 16px;
+  scroll-behavior: smooth;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  font-family: var(--font-body);
+  font-weight: 400;
+  line-height: 1.6;
+  color: var(--color-text-primary);
+  background-color: var(--color-bg-primary);
+  min-height: 100vh;
+}
+
+/* ─── Typography Hierarchy ─────────────────────────────────────────────────── */
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  font-family: var(--font-display);
+  font-weight: 600;
+  line-height: 1.25;
+  color: var(--color-text-primary);
+  letter-spacing: -0.01em;
+}
+
+h1 {
+  font-size: 3rem;
+  letter-spacing: -0.02em;
+}
+
+h2 {
+  font-size: 2.25rem;
+}
+
+h3 {
+  font-size: 1.75rem;
+}
+
+h4 {
+  font-size: 1.25rem;
+  font-weight: 500;
+}
+
+p {
+  margin-bottom: var(--space-md);
+}
+
+a {
+  color: var(--color-accent-primary);
+  text-decoration: none;
+  transition: color 0.15s ease;
+}
+
+a:hover {
+  color: var(--color-accent-hover);
+}
+
+/* ─── Form Elements ────────────────────────────────────────────────────────── */
+input,
+textarea,
+select,
+button {
+  font-family: inherit;
+  font-size: inherit;
+}
+
+input:focus,
+textarea:focus,
+select:focus {
+  outline: none;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   ANIMATIONS
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* Stagger keyframes */
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.stagger-1 {
+  animation: fadeInUp 0.6s var(--bezier-smooth) 0.1s both;
+}
+
+.stagger-2 {
+  animation: fadeInUp 0.6s var(--bezier-smooth) 0.2s both;
+}
+
+.stagger-3 {
+  animation: fadeInUp 0.6s var(--bezier-smooth) 0.3s both;
+}
+
+.stagger-4 {
+  animation: fadeInUp 0.6s var(--bezier-smooth) 0.4s both;
+}
+
+.stagger-5 {
+  animation: fadeInUp 0.6s var(--bezier-smooth) 0.5s both;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   UI COMPONENTS
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ─── Buttons ──────────────────────────────────────────────────────────────── */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-sm);
+  padding: 0.6rem 1.4rem;
+  font-family: var(--font-display);
+  font-size: 0.95rem;
+  font-weight: 500;
+  border: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all 0.2s var(--bezier-smooth);
+}
+
+.btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.btn-primary {
+  background: var(--color-text-primary);
+  color: var(--color-text-inverse);
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: black;
+  transform: translateY(-1px);
+}
+
+.btn-secondary {
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-primary);
+}
+
+.btn-secondary:hover:not(:disabled) {
+  background: var(--color-border);
+}
+
+.btn-accent {
+  background: var(--color-accent-primary);
+  color: white;
+}
+
+.btn-accent:hover:not(:disabled) {
+  background: var(--color-accent-hover);
+  transform: translateY(-1px);
+}
+
+/* ─── Cards ────────────────────────────────────────────────────────────────── */
+.card {
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-lg);
+  padding: var(--space-lg);
+  box-shadow: var(--shadow-sm);
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.card:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-md);
+}
+
+/* ─── Inputs ───────────────────────────────────────────────────────────────── */
+.input-text {
+  width: 100%;
+  padding: 0.8rem 1rem;
+  font-family: var(--font-body);
+  font-size: 1rem;
+  color: var(--color-text-primary);
+  background: var(--color-bg-primary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  transition: all 0.2s ease;
+}
+
+.input-text:focus {
+  background: var(--color-bg-elevated);
+  border-color: var(--color-text-primary);
+  box-shadow: 0 0 0 2px rgba(20, 20, 19, 0.1);
+}
+
+/* ─── Helpers ──────────────────────────────────────────────────────────────── */
+.text-accent {
+  color: var(--color-accent-primary);
+}
+
+.text-subtle {
+  color: var(--color-text-muted);
+}
+
+.bg-pattern-dot {
+  background-image: radial-gradient(var(--color-border) 1px, transparent 1px);
+  background-size: 24px 24px;
 }

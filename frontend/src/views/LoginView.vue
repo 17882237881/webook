@@ -1,55 +1,116 @@
 <template>
-  <div class="auth-container">
-    <div class="auth-card">
-      <h1 class="logo">📚 Webook</h1>
-      
-      <!-- 登录表单 -->
-      <div v-if="isLogin" class="form-section">
-        <h2>登录</h2>
-        <form @submit.prevent="handleLogin">
-          <div class="form-group">
-            <label>邮箱</label>
-            <input v-model="loginForm.email" type="email" placeholder="请输入邮箱" required />
-          </div>
-          <div class="form-group">
-            <label>密码</label>
-            <input v-model="loginForm.password" type="password" placeholder="请输入密码" required />
-          </div>
-          <button type="submit" class="btn-primary" :disabled="loading">
-            {{ loading ? '登录中...' : '登录' }}
-          </button>
-        </form>
-        <p class="switch-text">
-          还没有账号？<a @click="isLogin = false">立即注册</a>
-        </p>
-      </div>
+  <div class="auth-page">
+    <div class="auth-split-layout">
+      <!-- Left: Editorial/Brand Section -->
+      <section class="brand-section">
+        <div class="brand-content stagger-1">
+          <div class="brand-icon">W</div>
+          <h1 class="brand-title">Webook</h1>
+          <p class="brand-tagline">Where thoughts find their home.</p>
+        </div>
+        <div class="brand-footer stagger-2">
+          <p>© 2026 Webook Editorial</p>
+        </div>
+      </section>
 
-      <!-- 注册表单 -->
-      <div v-else class="form-section">
-        <h2>注册</h2>
-        <form @submit.prevent="handleSignup">
-          <div class="form-group">
-            <label>邮箱</label>
-            <input v-model="signupForm.email" type="email" placeholder="请输入邮箱" required />
+      <!-- Right: Form Section -->
+      <section class="form-section">
+        <div class="form-container stagger-3">
+          <div v-if="isLogin" class="auth-mode">
+            <h2 class="form-title">Welcome back</h2>
+            <p class="form-subtitle">Sign in to continue your writing journey.</p>
+            
+            <form @submit.prevent="handleLogin" class="auth-form">
+              <div class="form-group">
+                <label class="form-label">Email</label>
+                <input 
+                  v-model="loginForm.email" 
+                  type="email" 
+                  class="input-text"
+                  placeholder="name@example.com" 
+                  required 
+                />
+              </div>
+              
+              <div class="form-group">
+                <label class="form-label">Password</label>
+                <input 
+                  v-model="loginForm.password" 
+                  type="password" 
+                  class="input-text"
+                  placeholder="••••••••" 
+                  required 
+                />
+              </div>
+              
+              <button type="submit" class="btn btn-primary btn-block" :disabled="loading">
+                {{ loading ? 'Signing in...' : 'Sign In' }}
+              </button>
+            </form>
+            
+            <div class="form-footer">
+              <span>New to Webook?</span>
+              <a @click="isLogin = false" class="switch-link">Create an account</a>
+            </div>
           </div>
-          <div class="form-group">
-            <label>密码</label>
-            <input v-model="signupForm.password" type="password" placeholder="6-16位密码" required />
-          </div>
-          <div class="form-group">
-            <label>确认密码</label>
-            <input v-model="signupForm.confirmPassword" type="password" placeholder="请再次输入密码" required />
-          </div>
-          <button type="submit" class="btn-primary" :disabled="loading">
-            {{ loading ? '注册中...' : '注册' }}
-          </button>
-        </form>
-        <p class="switch-text">
-          已有账号？<a @click="isLogin = true">立即登录</a>
-        </p>
-      </div>
 
-      <p v-if="message" :class="['message', messageType]">{{ message }}</p>
+          <div v-else class="auth-mode">
+            <h2 class="form-title">Join Webook</h2>
+            <p class="form-subtitle">Start curating your thoughts today.</p>
+            
+            <form @submit.prevent="handleSignup" class="auth-form">
+              <div class="form-group">
+                <label class="form-label">Email</label>
+                <input 
+                  v-model="signupForm.email" 
+                  type="email" 
+                  class="input-text"
+                  placeholder="name@example.com" 
+                  required 
+                />
+              </div>
+              
+              <div class="form-group">
+                <label class="form-label">Password</label>
+                <input 
+                  v-model="signupForm.password" 
+                  type="password" 
+                  class="input-text"
+                  placeholder="Create a password" 
+                  required 
+                />
+              </div>
+              
+              <div class="form-group">
+                <label class="form-label">Confirm Password</label>
+                <input 
+                  v-model="signupForm.confirmPassword" 
+                  type="password" 
+                  class="input-text"
+                  placeholder="Confirm password" 
+                  required 
+                />
+              </div>
+              
+              <button type="submit" class="btn btn-primary btn-block" :disabled="loading">
+                {{ loading ? 'Creating account...' : 'Create Account' }}
+              </button>
+            </form>
+            
+            <div class="form-footer">
+              <span>Already a member?</span>
+              <a @click="isLogin = true" class="switch-link">Sign in instead</a>
+            </div>
+          </div>
+
+          <!-- Message Toast -->
+          <transition name="fade">
+            <div v-if="message" :class="['message-toast', messageType]">
+              {{ message }}
+            </div>
+          </transition>
+        </div>
+      </section>
     </div>
   </div>
 </template>
@@ -74,17 +135,15 @@ async function handleLogin() {
   try {
     const res = await login(loginForm.value.email, loginForm.value.password)
     if (res.code === 0) {
-      // 存储 JWT Token 和用户 ID
-      localStorage.setItem('token', res.data.token)
+      localStorage.setItem('token', res.data.accessToken)
       localStorage.setItem('userId', res.data.userId)
-      router.push('/profile')
+      localStorage.setItem('userEmail', loginForm.value.email)
+      router.push('/posts')
     } else {
-      message.value = res.msg || '登录失败'
-      messageType.value = 'error'
+      showMessage(res.msg || 'Login failed', 'error')
     }
   } catch (e) {
-    message.value = '网络错误'
-    messageType.value = 'error'
+    showMessage('Network error, please try again', 'error')
   }
   loading.value = false
 }
@@ -99,128 +158,241 @@ async function handleSignup() {
       signupForm.value.confirmPassword
     )
     if (res.code === 0) {
-      message.value = '注册成功，请登录'
-      messageType.value = 'success'
+      showMessage('Account created successfully. Please log in.', 'success')
       isLogin.value = true
       signupForm.value = { email: '', password: '', confirmPassword: '' }
     } else {
-      message.value = res.msg || '注册失败'
-      messageType.value = 'error'
+      showMessage(res.msg || 'Signup failed', 'error')
     }
   } catch (e) {
-    message.value = '网络错误'
-    messageType.value = 'error'
+    showMessage('Network error, please try again', 'error')
   }
   loading.value = false
+}
+
+function showMessage(msg, type) {
+  message.value = msg
+  messageType.value = type
+  setTimeout(() => { message.value = '' }, 3000)
 }
 </script>
 
 <style scoped>
-.auth-container {
+.auth-page {
   min-height: 100vh;
+  background: var(--color-bg-secondary);
+}
+
+.auth-split-layout {
+  display: flex;
+  min-height: 100vh;
+}
+
+/* ─── Brand Section (Left) ─────────────────────────────────────────────────── */
+.brand-section {
+  flex: 1;
+  background: var(--color-bg-primary);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: var(--space-3xl);
+  position: relative;
+  overflow: hidden;
+  border-right: 1px solid var(--color-border);
+}
+
+.brand-section::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 4px;
+  background: linear-gradient(90deg, var(--color-accent-primary), var(--color-accent-blue), var(--color-accent-green));
+}
+
+.brand-content {
+  max-width: 480px;
+  margin: 0 auto;
+}
+
+.brand-icon {
+  width: 48px;
+  height: 48px;
+  background: var(--color-text-primary);
+  color: var(--color-bg-primary);
+  font-family: var(--font-display);
+  font-size: 1.5rem;
+  font-weight: 600;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  border-radius: var(--radius-md);
+  margin-bottom: var(--space-xl);
 }
 
-.auth-card {
-  background: rgba(255, 255, 255, 0.95);
-  backdrop-filter: blur(10px);
-  border-radius: 20px;
-  padding: 40px;
-  width: 400px;
-  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+.brand-title {
+  font-size: 4rem;
+  font-weight: 300;
+  line-height: 1.1;
+  margin-bottom: var(--space-md);
+  color: var(--color-text-primary);
 }
 
-.logo {
-  text-align: center;
+.brand-tagline {
+  font-family: var(--font-body);
+  font-size: 1.5rem;
+  color: var(--color-text-secondary);
+  font-weight: 400;
+}
+
+.brand-footer {
+  position: absolute;
+  bottom: var(--space-xl);
+  left: var(--space-3xl);
+  font-size: 0.875rem;
+  color: var(--color-text-muted);
+}
+
+/* ─── Form Section (Right) ─────────────────────────────────────────────────── */
+.form-section {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-2xl);
+  background: var(--color-bg-elevated);
+}
+
+.form-container {
+  width: 100%;
+  max-width: 400px;
+}
+
+.form-title {
   font-size: 2rem;
-  margin-bottom: 30px;
-  color: #667eea;
+  margin-bottom: var(--space-xs);
 }
 
-h2 {
-  text-align: center;
-  margin-bottom: 25px;
-  color: #333;
+.form-subtitle {
+  color: var(--color-text-secondary);
+  margin-bottom: var(--space-2xl);
+}
+
+.auth-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-lg);
 }
 
 .form-group {
-  margin-bottom: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
 }
 
-.form-group label {
-  display: block;
-  margin-bottom: 8px;
-  color: #555;
+.form-label {
+  font-size: 0.875rem;
   font-weight: 500;
+  color: var(--color-text-primary);
 }
 
-.form-group input {
+.btn-block {
   width: 100%;
-  padding: 12px 16px;
-  border: 2px solid #e0e0e0;
-  border-radius: 10px;
-  font-size: 14px;
-  transition: border-color 0.3s;
-  box-sizing: border-box;
+  margin-top: var(--space-md);
+  padding: 1rem;
 }
 
-.form-group input:focus {
-  outline: none;
-  border-color: #667eea;
-}
-
-.btn-primary {
-  width: 100%;
-  padding: 14px;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  color: white;
-  border: none;
-  border-radius: 10px;
-  font-size: 16px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: transform 0.2s, box-shadow 0.2s;
-}
-
-.btn-primary:hover:not(:disabled) {
-  transform: translateY(-2px);
-  box-shadow: 0 10px 20px rgba(102, 126, 234, 0.4);
-}
-
-.btn-primary:disabled {
-  opacity: 0.7;
-  cursor: not-allowed;
-}
-
-.switch-text {
+.form-footer {
+  margin-top: var(--space-xl);
   text-align: center;
-  margin-top: 20px;
-  color: #666;
+  font-size: 0.95rem;
+  color: var(--color-text-secondary);
 }
 
-.switch-text a {
-  color: #667eea;
+.switch-link {
+  color: var(--color-accent-primary);
+  font-weight: 500;
+  margin-left: var(--space-xs);
   cursor: pointer;
-  font-weight: 600;
+  text-decoration: underline;
+  text-decoration-color: transparent;
+  transition: all 0.2s;
 }
 
-.message {
+.switch-link:hover {
+  color: var(--color-accent-hover);
+  text-decoration-color: currentColor;
+}
+
+/* ─── Toast ────────────────────────────────────────────────────────────────── */
+.message-toast {
+  padding: var(--space-md);
+  margin-top: var(--space-lg);
+  border-radius: var(--radius-sm);
+  font-size: 0.9rem;
   text-align: center;
-  padding: 10px;
-  border-radius: 8px;
-  margin-top: 15px;
 }
 
-.message.error {
-  background: #fee;
-  color: #c00;
+.message-toast.error {
+  background: var(--color-error-light);
+  color: var(--color-error);
 }
 
-.message.success {
-  background: #efe;
-  color: #060;
+.message-toast.success {
+  background: var(--color-success-light);
+  color: var(--color-success);
+}
+
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.3s ease;
+}
+
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
+}
+
+/* ─── Responsive ───────────────────────────────────────────────────────────── */
+@media (max-width: 1024px) {
+  .brand-title {
+    font-size: 3rem;
+  }
+}
+
+@media (max-width: 768px) {
+  .auth-split-layout {
+    flex-direction: column;
+  }
+
+  .brand-section {
+    padding: var(--space-xl);
+    flex: 0 0 auto;
+    border-right: none;
+    border-bottom: 1px solid var(--color-border);
+  }
+
+  .brand-icon {
+    display: none;
+  }
+
+  .brand-title {
+    font-size: 2rem;
+    margin-bottom: var(--space-xs);
+  }
+
+  .brand-tagline {
+    font-size: 1.1rem;
+  }
+
+  .brand-footer {
+    display: none;
+  }
+
+  .form-section {
+    padding: var(--space-xl);
+    align-items: flex-start;
+  }
 }
 </style>

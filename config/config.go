@@ -14,6 +14,12 @@ type Config struct {
 	JWT     JWTConfig
 	Session SessionConfig
 	CORS    CORSConfig
+	Log     LogConfig
+}
+
+type LogConfig struct {
+	Level string // debug, info, warn, error
+	IsDev bool   // 开发模式：彩色控制台输出；生产模式：JSON 格式
 }
 
 type ServerConfig struct {
@@ -77,6 +83,10 @@ func Load() *Config {
 		CORS: CORSConfig{
 			AllowOrigins: []string{getEnv("CORS_ORIGIN", "https://localhost:3000")},
 			MaxAge:       12 * time.Hour,
+		},
+		Log: LogConfig{
+			Level: getEnv("LOG_LEVEL", "info"),
+			IsDev: getEnv("APP_ENV", "dev") == "dev",
 		},
 	}
 }

@@ -15,7 +15,7 @@ func NewDB(cfg *config.Config) *gorm.DB {
 		panic(err)
 	}
 	// 自动迁移数据库表结构
-	err = db.AutoMigrate(&dao.User{})
+	err = db.AutoMigrate(&dao.User{}, &dao.Post{}, &dao.PublishedPost{})
 	if err != nil {
 		panic(err)
 	}

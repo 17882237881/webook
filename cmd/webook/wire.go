@@ -21,25 +21,33 @@ func InitWebServer(cfg *config.Config) *gin.Engine {
 		// 基础设施层
 		ioc.NewDB,
 		ioc.NewRedis,
+		ioc.NewLogger,
 
 		// DAO 层
 		dao.NewUserDAO,
+		dao.NewPostDAO,
+		dao.NewPublishedPostDAO,
 
 		// Cache 层
 		ProvideUserCacheExpiration,
 		cache.NewUserCache,
 		cache.NewTokenBlacklist,
+		cache.NewPostCache,
 
 		// Repository 层
 		repository.NewUserRepository,
+		repository.NewPostRepository,
+		repository.NewPublishedPostRepository,
 
 		// Service 层
 		service.NewUserService,
+		service.NewPostService,
 
 		// Handler 层
 		ProvideJWTExpireTime,
 		ProvideRefreshExpireTime,
 		web.NewUserHandler,
+		web.NewPostHandler,
 
 		// Web 层
 		ioc.NewGinEngine,

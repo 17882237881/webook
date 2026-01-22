@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import LoginView from '../views/LoginView.vue'
 import ProfileView from '../views/ProfileView.vue'
+import PostsView from '../views/PostsView.vue'
 
 const router = createRouter({
     history: createWebHistory(),
@@ -14,6 +15,12 @@ const router = createRouter({
             path: '/profile',
             name: 'profile',
             component: ProfileView,
+            meta: { requiresAuth: true }
+        },
+        {
+            path: '/posts',
+            name: 'posts',
+            component: PostsView,
             meta: { requiresAuth: true }
         }
     ]
