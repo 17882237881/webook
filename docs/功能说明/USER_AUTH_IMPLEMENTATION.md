@@ -50,36 +50,28 @@
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                      Handler 层 (web/)                       │
+│             Inbound Adapters (adapters/inbound/http/)       │
 │  负责：HTTP 请求处理、参数校验、响应格式化                      │
-│  文件：internal/web/user.go                                   │
+│  文件：internal/adapters/inbound/http/user.go                 │
 └─────────────────────────────────────────────────────────────┘
                               ↓ 调用接口
 ┌─────────────────────────────────────────────────────────────┐
-│                    Service 层 (service/)                     │
-│  UserService - 用户业务逻辑（密码加密、登录验证）                  │
-│  AuthService - 认证服务（Token 生成/刷新/退出）                 │
-│  文件：internal/service/user.go, auth.go                     │
+│                 Application 层 (application/)               │
+│  user.go - 用户业务逻辑（密码加密、登录验证）                  │
+│  auth.go - 认证服务（Token 生成/刷新/退出）                    │
 └─────────────────────────────────────────────────────────────┘
                               ↓ 依赖 ports 接口
 ┌─────────────────────────────────────────────────────────────┐
 │                      Ports 层 (ports/)                       │
-│  定义接口契约：UserRepository, TokenService,                    │
-│  UserCache, TokenBlacklist, AccessTokenVerifier              │
-│  文件：internal/ports/*.go                                    │
+│  input/  - 业务接口 (UserService, AuthService)               │
+│  output/ - 基础设施接口 (UserRepo, TokenService, Cache)       │
 └─────────────────────────────────────────────────────────────┘
                     ↓ 实现                    ↓ 实现
 ┌────────────────────────────┐    ┌────────────────────────────┐
-│  Repository 层             │    │      Infra 层               │
-│  实现 ports.UserRepository  │    │  实现 ports.TokenService     │
-│  装饰器: CachedUserRepo     │    │  文件: infra/auth/jwt.go     │
-│  文件: repository/user.go  │    └────────────────────────────┘
-└────────────────────────────┘
-                    ↓ 调用                    ↓ 调用
-┌────────────────────────────┐    ┌────────────────────────────┐
-│       DAO 层               │    │     Cache 层               │
-│  数据库操作、SQL 执行          │    │  Redis 缓存操作            │
-│  文件: dao/user.go         │    │  文件: cache/user.go        │
+│   Outbound Persistence     │    │       JWT Adapter          │
+│  MySQL/Redis 实现           │    │  JWT 实现 (TokenService)    │
+│  adapters/outbound/        │    │  adapters/outbound/        │
+│  persistence/              │    │  jwt/jwt.go                │
 └────────────────────────────┘    └────────────────────────────┘
 ```
 
@@ -87,7 +79,7 @@
 
 | 优势 | 说明 |
 |------|------|
-| **依赖倒置** | Service 层依赖 ports 接口，不依赖具体实现 |
+| **依赖倒置** | 应用层依赖 ports 接口，不依赖具体实现 |
 | **可测试性** | 通过 Mock 接口实现纯单元测试 |
 | **可维护性** | 修改一层不影响其他层 |
 | **可替换性** | 如需换 JWT 库，只需实现新的 `TokenService` 适配器 |
@@ -119,25 +111,25 @@ func InitWebServer(cfg *config.Config) *gin.Engine {
         ioc.NewTokenService,          // TokenService 接口
         ioc.NewAccessTokenVerifier,   // Token 验证器
 
-        // DAO 层
+        // DAO 层 (Adapters/Outbound/Persistence/MySQL)
         dao.NewUserDAO,
 
-        // Cache 层
+        // Cache 层 (Adapters/Outbound/Persistence/Redis)
         ProvideUserCacheExpiration,
         cache.NewUserCache,
         cache.NewTokenBlacklist,
 
-        // Repository 层 (实现 ports 接口)
+        // Repository 层 (Adapters/Outbound/Repository)
         repository.NewUserRepository,
         repository.NewCachedUserRepository,  // 装饰器模式
 
-        // Service 层
+        // Application 层
         service.NewUserService,
         ProvideAccessExpireTime,
         ProvideRefreshExpireTime,
         service.NewAuthService,       // 认证服务
 
-        // Handler 层
+        // Inbound Adapters (HTTP)
         web.NewUserHandler,
         ioc.NewGinEngine,
     )
@@ -190,7 +182,7 @@ func main() {
 **密码加密：** 使用 `bcrypt` 算法
 
 ```go
-// internal/service/user.go
+// internal/application/user.go
 hash, err := bcrypt.GenerateFromPassword([]byte(u.Password), bcrypt.DefaultCost)
 u.Password = string(hash)
 ```
@@ -300,24 +292,16 @@ POST /auth/logout
 **实现代码（基于 AuthService 抽象）：**
 
 ```go
-// internal/service/auth.go
+// internal/application/auth.go
 func (a *authService) Logout(ctx context.Context, refreshToken string) error {
     // 1. 解析 Refresh Token 获取 SSid
     claims, err := a.tokens.ParseRefreshToken(refreshToken)
-    if err != nil {
-        return nil
-    }
-    // 2. 将 SSid 加入 Redis 黑名单
-    return a.blacklist.Add(ctx, claims.SSid, a.refreshExpire)
+    // ...
 }
 
-// internal/web/user.go
+// internal/adapters/inbound/http/user.go
 func (u *UserHandler) Logout(c *gin.Context) {
-    var req LogoutReq
-    if err := c.ShouldBindJSON(&req); err != nil {
-        ginx.Error(c, ginx.CodeInvalidParams, "invalid params")
-        return
-    }
+    // ...
     if err := u.auth.Logout(c.Request.Context(), req.RefreshToken); err != nil {
         ginx.Error(c, ginx.CodeInternalError, "logout failed")
         return
@@ -346,7 +330,7 @@ token:blacklist:{ssid}
 **缓存实现：**
 
 ```go
-// internal/repository/cache/user.go
+// internal/adapters/outbound/persistence/redis/user_cache.go
 type UserCache interface {
     Get(ctx context.Context, id int64) (domain.User, error)
     Set(ctx context.Context, u domain.User) error
@@ -408,15 +392,9 @@ ok, err := emailExp.MatchString(email)
 利用数据库唯一索引约束，在 DAO 层捕获错误：
 
 ```go
-// internal/repository/dao/user.go
+// internal/adapters/outbound/persistence/mysql/user.go
 func (d *UserDAO) Insert(ctx context.Context, u User) error {
-    err := d.db.WithContext(ctx).Create(&u).Error
-    if me, ok := err.(*mysql.MySQLError); ok {
-        if me.Number == 1062 { // MySQL 唯一索引冲突错误码
-            return ErrDuplicateEmail
-        }
-    }
-    return err
+    // ...
 }
 ```
 
@@ -472,7 +450,7 @@ if claims.UserAgent != currentUA {
 各接口返回格式不统一，前端处理困难。
 
 **解决方案：**  
-封装统一响应工具 `internal/web/ginx`：
+封装统一响应工具 `internal/adapters/inbound/http/ginx`：
 
 ```go
 // 成功响应
@@ -611,31 +589,20 @@ Authorization: Bearer <token>
 
 ```
 webook/
-├── wire.go              # Wire 注入器定义
-├── wire_gen.go          # Wire 自动生成的依赖注入代码
-├── main.go              # 应用入口
-├── config/              # 配置管理
-│   └── config.go
-├── ioc/                 # IOC 容器 (Provider 函数)
-│   ├── db.go            # 数据库 Provider
-│   ├── redis.go         # Redis Provider
-│   └── web.go           # Gin Engine + 中间件 Provider
-└── internal/
-    ├── domain/          # 领域对象
-    │   └── user.go
-    ├── web/             # HTTP 处理层
-    │   ├── user.go      # UserHandler
-    │   └── middleware/  # 中间件
-    │       ├── jwt.go   # JWT 认证
-    │       └── login.go # Session 认证（备选）
-    ├── service/         # 业务逻辑层
-    │   └── user.go
-    └── repository/      # 数据持久化层
-        ├── user.go
-        ├── cache/       # 缓存层
-        │   └── user.go  # UserCache (Redis)
-        └── dao/         # 数据访问对象
-            └── user.go  # UserDAO
+├── cmd/webook/
+│   ├── wire.go          # Wire 注入器定义
+│   └── main.go          # 应用入口
+├── internal/
+│   ├── domain/          # 🔵 核心领域层
+│   ├── application/     # 🟢 应用层 (业务逻辑)
+│   ├── ports/           # 🟡 端口层 (接口定义)
+│   │   ├── input/       #   入站端口
+│   │   └── output/      #   出站端口
+│   ├── adapters/        # 🔴 适配器层
+│   │   ├── inbound/     #   入站 (HTTP)
+│   │   └── outbound/    │   出站 (MySQL/Redis/JWT)
+│   └── ioc/             # ⚙️ IOC 容器
+└── pkg/                 # 公共公共库
 ```
 
 ---
@@ -644,8 +611,8 @@ webook/
 
 本模块实现了一个安全、可扩展的用户认证系统：
 
-1. **端口与适配器架构**：Handler → Service → Ports(接口) → Repository/Infra
-2. **AuthService 抽象**：Token 生成/刷新/退出逻辑与 Handler 解耦
+1. **端口与适配器架构**：Web Adapter → Application → Ports(接口) → Persistence/JWT Adapters
+2. **AuthService 抽象**：Token 生成/刷新/退出逻辑与 Web Adapter 解耦
 3. **Wire 依赖注入**：编译时代码生成，零运行时开销
 4. **安全设计**：bcrypt 密码加密、JWT Token、User-Agent 绑定
 5. **性能优化**：Redis 缓存用户信息，装饰器模式实现缓存层

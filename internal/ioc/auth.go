@@ -2,8 +2,8 @@ package ioc
 
 import (
 	"webook/config"
-	"webook/internal/infra/auth"
-	"webook/internal/ports"
+	auth "webook/internal/adapters/outbound/jwt"
+	ports "webook/internal/ports/output"
 )
 
 func NewJWTService(cfg *config.Config) *auth.JWTService {

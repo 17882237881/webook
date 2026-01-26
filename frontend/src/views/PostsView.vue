@@ -38,6 +38,11 @@
             <div class="post-item-content">
               <h4 class="post-item-title">{{ post.title || 'Untitled Story' }}</h4>
               <span class="post-item-meta">{{ post.status === 1 ? 'Published' : 'Draft' }} · {{ formatTime(post.utime) }}</span>
+              <div class="post-item-stats">
+                <span class="stat-pill">👍 {{ post.likeCnt || 0 }}</span>
+                <span class="stat-pill">⭐ {{ post.collectCnt || 0 }}</span>
+                <span class="stat-pill">👀 {{ post.readCnt || 0 }}</span>
+              </div>
             </div>
           </div>
         </div>
@@ -99,6 +104,17 @@
             <p class="feed-item-excerpt">{{ post.content.substring(0, 80) }}...</p>
             <div class="feed-item-meta">
               <span>By User {{ post.authorId }}</span>
+              <div class="feed-item-stats">
+                <button class="stat-btn" :class="{ active: post.liked }" @click.stop="toggleLike(post)">
+                  👍 {{ post.likeCnt || 0 }}
+                </button>
+                <button class="stat-btn" :class="{ active: post.collected }" @click.stop="toggleCollect(post)">
+                  ⭐ {{ post.collectCnt || 0 }}
+                </button>
+                <button class="stat-btn" @click.stop="markRead(post)">
+                  👀 {{ post.readCnt || 0 }}
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -110,7 +126,7 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { savePost, publishPost, getMyPosts, getPublishedPosts, deletePost, getDraft } from '../api/post.js'
+import { savePost, publishPost, getMyPosts, getPublishedPosts, deletePost, getDraft, likePost, unlikePost, collectPost, uncollectPost, readPost } from '../api/post.js'
 
 const router = useRouter()
 
@@ -123,6 +139,27 @@ const publishing = ref(false)
 const message = ref('')
 const messageType = ref('success')
 
+function extractStats(post = {}) {
+  return {
+    likeCnt: Number.isFinite(post.likeCnt) ? post.likeCnt : 0,
+    collectCnt: Number.isFinite(post.collectCnt) ? post.collectCnt : 0,
+    readCnt: Number.isFinite(post.readCnt) ? post.readCnt : 0,
+    liked: !!post.liked,
+    collected: !!post.collected
+  }
+}
+
+function normalizePost(post) {
+  return {
+    ...post,
+    ...extractStats(post)
+  }
+}
+
+function normalizePosts(posts) {
+  return (posts || []).map((post) => normalizePost(post))
+}
+
 // Load data
 onMounted(async () => {
   await loadMyPosts()
@@ -133,7 +170,7 @@ async function loadMyPosts() {
   try {
     const res = await getMyPosts()
     if (res.code === 0) {
-      myPosts.value = res.data.posts || []
+      myPosts.value = normalizePosts(res.data.posts)
     }
   } catch (e) {
     console.error('Failed to load posts', e)
@@ -144,15 +181,66 @@ async function loadPublishedPosts() {
   try {
     const res = await getPublishedPosts()
     if (res.code === 0) {
-      publishedPosts.value = res.data.posts || []
+      publishedPosts.value = normalizePosts(res.data.posts)
     }
   } catch (e) {
     console.error('Failed to load published posts', e)
   }
 }
 
+async function toggleLike(post) {
+  try {
+    if (post.liked) {
+      const res = await unlikePost(post.id)
+      if (res.code === 0) {
+        post.liked = false
+        post.likeCnt = Math.max(0, (post.likeCnt || 0) - 1)
+      }
+    } else {
+      const res = await likePost(post.id)
+      if (res.code === 0) {
+        post.liked = true
+        post.likeCnt = (post.likeCnt || 0) + 1
+      }
+    }
+  } catch (e) {
+    console.error('Failed to toggle like', e)
+  }
+}
+
+async function toggleCollect(post) {
+  try {
+    if (post.collected) {
+      const res = await uncollectPost(post.id)
+      if (res.code === 0) {
+        post.collected = false
+        post.collectCnt = Math.max(0, (post.collectCnt || 0) - 1)
+      }
+    } else {
+      const res = await collectPost(post.id)
+      if (res.code === 0) {
+        post.collected = true
+        post.collectCnt = (post.collectCnt || 0) + 1
+      }
+    }
+  } catch (e) {
+    console.error('Failed to toggle collect', e)
+  }
+}
+
+async function markRead(post) {
+  try {
+    const res = await readPost(post.id)
+    if (res.code === 0) {
+      post.readCnt = (post.readCnt || 0) + 1
+    }
+  } catch (e) {
+    console.error('Failed to mark read', e)
+  }
+}
+
 function createNewPost() {
-  currentPost.value = { id: 0, title: '', content: '', status: 0 }
+  currentPost.value = { id: 0, title: '', content: '', status: 0, ...extractStats() }
   message.value = ''
 }
 
@@ -160,13 +248,13 @@ async function selectPost(post) {
   try {
     const res = await getDraft(post.id)
     if (res.code === 0) {
-      currentPost.value = res.data
+      currentPost.value = { ...res.data, ...extractStats(post) }
     } else {
-      currentPost.value = { ...post }
+      currentPost.value = normalizePost({ ...post })
     }
     message.value = ''
   } catch (e) {
-    currentPost.value = { ...post }
+    currentPost.value = normalizePost({ ...post })
   }
 }
 
@@ -406,6 +494,21 @@ function logout() {
   font-family: var(--font-body);
 }
 
+.post-item-stats {
+  display: flex;
+  gap: var(--space-xs);
+  margin-top: 6px;
+  font-size: 0.7rem;
+  color: var(--color-text-muted);
+}
+
+.stat-pill {
+  border: 1px solid var(--color-border-light);
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: var(--color-bg-elevated);
+}
+
 /* ─── Editor Area ──────────────────────────────────────────────────────────── */
 .editor-area {
   flex: 1;
@@ -567,6 +670,36 @@ function logout() {
   color: var(--color-text-muted);
   text-transform: uppercase;
   letter-spacing: 0.05em;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-sm);
+}
+
+.feed-item-stats {
+  display: flex;
+  gap: var(--space-xs);
+}
+
+.stat-btn {
+  border: 1px solid var(--color-border);
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: 0.7rem;
+  padding: 2px 6px;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.stat-btn:hover {
+  color: var(--color-text-primary);
+  border-color: var(--color-text-primary);
+}
+
+.stat-btn.active {
+  color: var(--color-accent-primary);
+  border-color: var(--color-accent-primary);
 }
 
 .text-error {

@@ -67,3 +67,23 @@ export function deletePost(id) {
         method: 'DELETE'
     })
 }
+
+export function likePost(id) {
+    return request(`/posts/${id}/like`, { method: 'POST' })
+}
+
+export function unlikePost(id) {
+    return request(`/posts/${id}/unlike`, { method: 'POST' })
+}
+
+export function collectPost(id) {
+    return request(`/posts/${id}/collect`, { method: 'POST' })
+}
+
+export function uncollectPost(id) {
+    return request(`/posts/${id}/uncollect`, { method: 'POST' })
+}
+
+export function readPost(id) {
+    return request(`/posts/${id}/read`, { method: 'POST' })
+}

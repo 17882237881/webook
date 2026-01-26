@@ -1,6 +1,6 @@
 ﻿# Webook K8s 部署指南
 
-本文档介绍如何使用 Kubernetes 部署 Webook 应用（3 副本）。
+本文档介绍如何使用 Kubernetes 部署 Webook 应用（3 副本），并包含 RabbitMQ（消息队列）。
 
 ## 环境要求
 
@@ -15,7 +15,7 @@
 ```powershell
 # 编译 Linux 二进制文件
 $env:GOOS='linux'; $env:GOARCH='amd64'; $env:CGO_ENABLED='0'
-go build -o webook-linux .
+go build -o webook-linux ./cmd/webook
 
 # 构建 Docker 镜像
 docker build -t webook:latest -f deploy/docker/Dockerfile .
@@ -30,13 +30,14 @@ kubectl apply -f deploy/k8s/configmap.yaml
 kubectl apply -f deploy/k8s/secret.yaml
 kubectl apply -f deploy/k8s/mysql.yaml
 kubectl apply -f deploy/k8s/redis.yaml
+kubectl apply -f deploy/k8s/rabbitmq.yaml
 kubectl apply -f deploy/k8s/webook.yaml
 ```
 
 ### 3. 验证部署
 
 ```powershell
-# 查看 Pod 状态（应该有 5 个 Pod：1 MySQL + 1 Redis + 3 Webook）
+# 查看 Pod 状态（应该有 6 个 Pod：1 MySQL + 1 Redis + 1 RabbitMQ + 3 Webook）
 kubectl get pods -n webook
 
 # 查看 Service
@@ -80,6 +81,7 @@ deploy/k8s/
 ├── secret.yaml      # 敏感信息（JWT密钥等）
 ├── mysql.yaml       # MySQL 部署 + 持久化存储
 ├── redis.yaml       # Redis 部署
+├── rabbitmq.yaml    # RabbitMQ 部署
 └── webook.yaml      # Webook 应用（3 副本）
 ```
 
@@ -88,6 +90,7 @@ deploy/k8s/
 ### ConfigMap（非敏感配置）
 - `DB_DSN`: MySQL 连接地址
 - `REDIS_ADDR`: Redis 连接地址
+- `AMQP_URL`: RabbitMQ 连接地址
 - `CORS_ORIGIN`: CORS 允许的域名
 
 ### Secret（敏感配置）

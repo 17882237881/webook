@@ -2,7 +2,7 @@
 # 简化版 Dockerfile - 使用本地构建的二进制文件
 # ============================================
 # 使用前请先运行:
-# $env:GOOS='linux'; $env:GOARCH='amd64'; $env:CGO_ENABLED='0'; go build -o webook-linux .
+# $env:GOOS='linux'; $env:GOARCH='amd64'; $env:CGO_ENABLED='0'; go build -o webook-linux ./cmd/webook
 
 FROM alpine:3.19
 

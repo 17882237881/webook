@@ -2,6 +2,7 @@ package config
 
 import (
 	"os"
+	"strconv"
 	"time"
 )
 
@@ -10,6 +11,7 @@ type Config struct {
 	Server  ServerConfig
 	DB      DBConfig
 	Redis   RedisConfig
+	MQ      MQConfig
 	Cache   CacheConfig
 	JWT     JWTConfig
 	Session SessionConfig
@@ -40,6 +42,14 @@ type RedisConfig struct {
 	Password string
 }
 
+type MQConfig struct {
+	URL        string
+	Exchange   string
+	Queue      string
+	RoutingKey string
+	Prefetch   int
+}
+
 type CacheConfig struct {
 	UserExpiration time.Duration // 用户缓存过期时间
 }
@@ -68,6 +78,13 @@ func Load() *Config {
 			Addr:     getEnv("REDIS_ADDR", "localhost:6379"),
 			Password: getEnv("REDIS_PASSWORD", ""),
 		},
+		MQ: MQConfig{
+			URL:        getEnv("AMQP_URL", "amqp://guest:guest@localhost:5672/"),
+			Exchange:   getEnv("MQ_EXCHANGE", "post.stats.exchange"),
+			Queue:      getEnv("MQ_QUEUE", "post.stats.queue"),
+			RoutingKey: getEnv("MQ_ROUTING_KEY", "post.stats"),
+			Prefetch:   getEnvAsInt("MQ_PREFETCH", 50),
+		},
 		Cache: CacheConfig{
 			UserExpiration: 15 * time.Minute,
 		},
@@ -91,6 +108,14 @@ func Load() *Config {
 	}
 }
 
+func getEnvAsInt(key string, defaultValue int) int {
+	if value := os.Getenv(key); value != "" {
+		if v, err := strconv.Atoi(value); err == nil {
+			return v
+		}
+	}
+	return defaultValue
+}
 func getEnv(key, defaultValue string) string {
 	if value := os.Getenv(key); value != "" {
 		return value

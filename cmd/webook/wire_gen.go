@@ -9,14 +9,15 @@ package main
 import (
 	"time"
 
-	"github.com/gin-gonic/gin"
 	"webook/config"
+	web "webook/internal/adapters/inbound/http"
+	dao "webook/internal/adapters/outbound/persistence/mysql"
+	cache "webook/internal/adapters/outbound/persistence/redis"
+	"webook/internal/adapters/outbound/repository"
+	"webook/internal/application"
 	"webook/internal/ioc"
-	"webook/internal/repository"
-	"webook/internal/repository/cache"
-	"webook/internal/repository/dao"
-	"webook/internal/service"
-	"webook/internal/web"
+
+	"github.com/gin-gonic/gin"
 )
 
 // InitWebServer initializes the web server.
@@ -25,29 +26,56 @@ func InitWebServer(cfg *config.Config) *gin.Engine {
 	userDAO := dao.NewUserDAO(db)
 	postDAO := dao.NewPostDAO(db)
 	publishedPostDAO := dao.NewPublishedPostDAO(db)
+	postStatsDAO := dao.NewPostStatsDAO(db)
+	postLikeDAO := dao.NewPostLikeDAO(db)
+	postCollectDAO := dao.NewPostCollectDAO(db)
 	cmdable := ioc.NewRedis(cfg)
 	userCacheExpiration := ProvideUserCacheExpiration(cfg)
 	userCache := cache.NewUserCache(cmdable, userCacheExpiration)
 	tokenBlacklist := cache.NewTokenBlacklist(cmdable)
 	postCache := cache.NewPostCache(cmdable)
+	postStatsCache := cache.NewPostStatsCache(cmdable)
 	userRepository := repository.NewUserRepository(userDAO)
 	cachedUserRepository := repository.NewCachedUserRepository(userRepository, userCache)
 	postRepository := repository.NewPostRepository(postDAO)
 	publishedPostRepository := repository.NewPublishedPostRepository(publishedPostDAO)
 	cachedPublishedPostRepository := repository.NewCachedPublishedPostRepository(publishedPostRepository, postCache)
-	userService := service.NewUserService(cachedUserRepository)
-	postService := service.NewPostService(postRepository, cachedPublishedPostRepository)
+	postStatsRepository := repository.NewPostStatsRepository(postStatsDAO)
+	postLikeRepository := repository.NewPostLikeRepository(postLikeDAO)
+	postCollectRepository := repository.NewPostCollectRepository(postCollectDAO)
+	rabbitMQConn := ioc.NewRabbitMQConn(cfg)
+	rabbitMQProducerChannel := ioc.NewRabbitMQProducerChannel(rabbitMQConn)
+	postStatsPublisher := ioc.NewPostStatsPublisher(rabbitMQProducerChannel, cfg)
+	userService := application.NewUserService(cachedUserRepository)
+	postService := application.NewPostService(postRepository, cachedPublishedPostRepository)
+	postInteractionService := application.NewPostInteractionService(postLikeRepository, postCollectRepository, postStatsRepository, postStatsCache, postStatsPublisher)
 	jwtService := ioc.NewJWTService(cfg)
 	tokenService := ioc.NewTokenService(jwtService)
 	accessTokenVerifier := ioc.NewAccessTokenVerifier(jwtService)
 	accessExpireTime := ProvideAccessExpireTime(cfg)
 	refreshExpireTime := ProvideRefreshExpireTime(cfg)
-	authService := service.NewAuthService(tokenService, tokenBlacklist, accessExpireTime, refreshExpireTime)
+	authService := application.NewAuthService(tokenService, tokenBlacklist, accessExpireTime, refreshExpireTime)
 	userHandler := web.NewUserHandler(userService, authService)
-	postHandler := web.NewPostHandler(postService)
+	postHandler := web.NewPostHandler(postService, postInteractionService)
 	logger := ioc.NewLogger(cfg)
 	engine := ioc.NewGinEngine(cfg, userHandler, postHandler, accessTokenVerifier, logger)
 	return engine
+}
+
+// InitPostStatsWorker initializes the stats worker.
+func InitPostStatsWorker(cfg *config.Config) *application.PostStatsWorker {
+	db := ioc.NewDB(cfg)
+	postStatsDAO := dao.NewPostStatsDAO(db)
+	cmdable := ioc.NewRedis(cfg)
+	postStatsCache := cache.NewPostStatsCache(cmdable)
+	postStatsRepository := repository.NewPostStatsRepository(postStatsDAO)
+	logger := ioc.NewLogger(cfg)
+	rabbitMQConn := ioc.NewRabbitMQConn(cfg)
+	rabbitMQConsumerChannel := ioc.NewRabbitMQConsumerChannel(rabbitMQConn)
+	postStatsConsumer := ioc.NewPostStatsConsumer(rabbitMQConsumerChannel, cfg, postStatsCache, logger)
+	postStatsFlusher := application.NewPostStatsFlusher(postStatsCache, postStatsRepository, logger)
+	postStatsWorker := application.NewPostStatsWorker(postStatsConsumer, postStatsFlusher)
+	return postStatsWorker
 }
 
 // ProvideUserCacheExpiration provides user cache expiration.

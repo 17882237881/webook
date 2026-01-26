@@ -1,5 +1,9 @@
 package logger
 
+import (
+	"time"
+)
+
 // Logger 定义日志接口，便于切换底层实现
 type Logger interface {
 	Debug(msg string, fields ...Field)
@@ -44,5 +48,9 @@ func Error(err error) Field {
 }
 
 func Any(key string, value any) Field {
+	return Field{Key: key, Value: value}
+}
+
+func Duration(key string, value time.Duration) Field {
 	return Field{Key: key, Value: value}
 }

@@ -2,9 +2,9 @@ package ioc
 
 import (
 	"webook/config"
-	"webook/internal/ports"
-	"webook/internal/web"
-	"webook/internal/web/middleware"
+	ports "webook/internal/ports/output"
+	web "webook/internal/adapters/inbound/http"
+	"webook/internal/adapters/inbound/http/middleware"
 	"webook/pkg/logger"
 
 	"github.com/gin-contrib/cors"

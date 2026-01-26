@@ -33,35 +33,28 @@
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                    Handler 层 (web/post.go)                  │
+│             Inbound Adapters (adapters/inbound/http/)       │
 │  负责：HTTP 请求处理、参数校验、权限验证                         │
+│  文件：internal/adapters/inbound/http/post.go                 │
 └─────────────────────────────────────────────────────────────┘
                               ↓ 调用接口
 ┌─────────────────────────────────────────────────────────────┐
-│                  Service 层 (service/post.go)                │
-│  PostService 接口 + postService 实现                          │
-│  负责：业务逻辑（分页计算、发布流程、权限校验）                   │
+│                 Application 层 (application/)               │
+│  post.go - 业务逻辑（分页计算、发布流程、权限校验）               │
 └─────────────────────────────────────────────────────────────┘
                               ↓ 依赖 ports 接口
 ┌─────────────────────────────────────────────────────────────┐
 │                      Ports 层 (ports/)                       │
-│  PostRepository - 草稿帖子仓储接口                             │
-│  PublishedPostRepository - 已发布帖子仓储接口                   │
-│  PostCache - 帖子缓存接口                                      │
+│  input/  - PostService 接口定义                              │
+│  output/ - PostRepository, PublishedPostRepository, Cache    │
 └─────────────────────────────────────────────────────────────┘
                     ↓ 实现                    ↓ 实现
 ┌────────────────────────────┐    ┌────────────────────────────┐
-│      Repository 层          │    │      Cache 层              │
-│  postRepository             │    │  PostCache (Redis)         │
-│  publishedPostRepository    │    │  cachedPublishedPostRepo   │
-│  实现 ports 接口             │    │  (装饰器模式)               │
+│   Outbound Persistence     │    │      Outbound Redis        │
+│  MySQL 实现                 │    │  Redis 缓存实现            │
+│  adapters/outbound/        │    │  adapters/outbound/        │
+│  persistence/mysql/        │    │  persistence/redis/        │
 └────────────────────────────┘    └────────────────────────────┘
-                    ↓ 调用
-┌────────────────────────────┐
-│       DAO 层                │
-│  PostDAO / PublishedPostDAO│
-│  负责：数据库 CRUD 操作       │
-└────────────────────────────┘
 ```
 
 ### 双表设计
@@ -89,9 +82,9 @@
 用户提交 → 参数校验 → 获取用户ID → 判断新建/更新 → 持久化 → 返回ID
 ```
 
-**Service 层实现：**
+**Application 层实现：**
 ```go
-// internal/service/post.go
+// internal/application/post.go
 func (s *postService) Save(ctx context.Context, p domain.Post) (int64, error) {
     if p.Id == 0 {
         return s.repo.Create(ctx, p)  // 新建
@@ -113,37 +106,12 @@ func (s *postService) Save(ctx context.Context, p domain.Post) (int64, error) {
 用户提交 → 参数校验 → 设置状态为已发布 → 同步到两张表 → 返回ID
 ```
 
-**Repository 层实现（事务同步）：**
+**Persistence Adapter 实现（事务同步）：**
 ```go
-// internal/repository/dao/post.go
+// internal/adapters/outbound/persistence/mysql/post.go
 func (d *PostDAO) Sync(ctx context.Context, p Post) (int64, error) {
-    return p.Id, d.db.Transaction(func(tx *gorm.DB) error {
-        // 1. 更新或创建草稿表记录
-        if p.Id == 0 {
-            err := tx.Create(&p).Error
-            if err != nil {
-                return err
-            }
-        } else {
-            err := tx.Model(&Post{}).Where("id = ? AND author_id = ?", p.Id, p.AuthorId).
-                Updates(map[string]any{
-                    "title":   p.Title,
-                    "content": p.Content,
-                    "status":  p.Status,
-                    "utime":   time.Now().UnixMilli(),
-                }).Error
-            if err != nil {
-                return err
-            }
-        }
-
-        // 2. 同步到已发布表（Upsert）
-        pubPost := PublishedPost{...}
-        return tx.Clauses(clause.OnConflict{
-            Columns:   []clause.Column{{Name: "id"}},
-            DoUpdates: clause.AssignmentColumns([]string{"title", "content", "utime"}),
-        }).Create(&pubPost).Error
-    })
+    // 使用事务同步草稿表和已发布表
+    // ...
 }
 ```
 
@@ -174,25 +142,10 @@ func (h *PostHandler) ListByAuthor(c *gin.Context) {
 从 `published_posts` 表读取，支持缓存：
 
 ```go
-// internal/repository/post.go
+// internal/adapters/outbound/repository/post.go
 func (r *cachedPublishedPostRepository) FindById(ctx context.Context, id int64) (domain.Post, error) {
-    // 1. 先查缓存
-    p, err := r.cache.Get(ctx, id)
-    if err == nil {
-        return p, nil
-    }
-
-    // 2. 缓存未命中，查数据库
-    p, err = r.repo.FindById(ctx, id)
-    if err != nil {
-        return domain.Post{}, err
-    }
-
-    // 3. 异步回写缓存
-    go func() {
-        _ = r.cache.Set(ctx, p)
-    }()
-    return p, nil
+    // 带有缓存的查询实现
+    // ...
 }
 ```
 
@@ -203,19 +156,10 @@ func (r *cachedPublishedPostRepository) FindById(ctx context.Context, id int64) 
 采用**软删除**，修改状态为私有，同时从 `published_posts` 表移除：
 
 ```go
-// internal/repository/dao/post.go
+// internal/adapters/outbound/persistence/mysql/post.go
 func (d *PostDAO) SyncStatus(ctx context.Context, id, authorId int64, status uint8) error {
-    return d.db.Transaction(func(tx *gorm.DB) error {
-        // 1. 更新草稿表状态
-        res := tx.Model(&Post{}).Where("id = ? AND author_id = ?", id, authorId).
-            Updates(map[string]any{"status": status, "utime": time.Now().UnixMilli()})
-        if res.RowsAffected == 0 {
-            return gorm.ErrRecordNotFound
-        }
-
-        // 2. 从已发布表删除
-        return tx.Where("id = ?", id).Delete(&PublishedPost{}).Error
-    })
+    // 软删除同步逻辑
+    // ...
 }
 ```
 
@@ -237,6 +181,7 @@ type Post struct {
     Utime    int64  // 更新时间戳
 }
 
+// internal/domain/post.go
 const (
     PostStatusDraft     uint8 = 0
     PostStatusPublished uint8 = 1
@@ -244,56 +189,19 @@ const (
 )
 ```
 
-### DAO 层
-
-```go
-// internal/repository/dao/post.go
-type Post struct {
-    Id       int64  `gorm:"primaryKey;autoIncrement"`
-    Title    string `gorm:"type:varchar(255)"`
-    Content  string `gorm:"type:text"`
-    AuthorId int64  `gorm:"index"`
-    Status   uint8  `gorm:"default:0"`
-    Ctime    int64
-    Utime    int64
-}
-
-type PublishedPost struct {
-    Id       int64  `gorm:"primaryKey"`  // 不自动递增，使用草稿表ID
-    Title    string `gorm:"type:varchar(255)"`
-    Content  string `gorm:"type:text"`
-    AuthorId int64  `gorm:"index"`
-    Ctime    int64
-    Utime    int64
-}
+// internal/adapters/outbound/persistence/mysql/user_model.go
+// 数据库模型定义
+type Post struct { ... }
+type PublishedPost struct { ... }
 ```
 
 ---
 
-## Ports 接口定义
+// internal/ports/output/post_repository.go
+type PostRepository interface { ... }
 
-```go
-// internal/ports/post_repository.go
-type PostRepository interface {
-    Create(ctx context.Context, p domain.Post) (int64, error)
-    Update(ctx context.Context, p domain.Post) error
-    FindById(ctx context.Context, id int64) (domain.Post, error)
-    FindByAuthor(ctx context.Context, authorId int64, offset, limit int) ([]domain.Post, error)
-    Sync(ctx context.Context, p domain.Post) (int64, error)
-    SyncStatus(ctx context.Context, id int64, authorId int64, status uint8) error
-}
-
-type PublishedPostRepository interface {
-    FindById(ctx context.Context, id int64) (domain.Post, error)
-    List(ctx context.Context, offset, limit int) ([]domain.Post, error)
-}
-
-// internal/ports/cache.go
-type PostCache interface {
-    Get(ctx context.Context, id int64) (domain.Post, error)
-    Set(ctx context.Context, p domain.Post) error
-    Delete(ctx context.Context, id int64) error
-}
+// internal/ports/output/cache.go
+type PostCache interface { ... }
 ```
 
 ---
@@ -493,13 +401,15 @@ Authorization: Bearer <token>
 
 ## 测试用例
 
-### Service 层单元测试
+### Application 层单元测试
 
 使用 `gomock` 生成 Repository Mock，实现纯单元测试：
 
 ```go
-// internal/service/post_test.go
-func TestPostService_Save(t *testing.T) {
+// internal/application/post_test.go
+import (
+    repomocks "webook/internal/adapters/outbound/mocks"
+)
     tests := []struct {
         name    string
         post    domain.Post
@@ -569,10 +479,10 @@ func TestPostService_Save(t *testing.T) {
 
 ```powershell
 # 运行所有测试
-go test ./internal/service/... -v
+go test ./internal/application/... -v
 
 # 生成 Mock 文件
-mockgen -source=internal/ports/post_repository.go -destination=internal/repository/mocks/post_mock.go -package=repomocks
+mockgen -source=internal/ports/output/post_repository.go -destination=internal/adapters/outbound/mocks/post_mock.go -package=repomocks
 ```
 
 ---
@@ -583,11 +493,11 @@ mockgen -source=internal/ports/post_repository.go -destination=internal/reposito
 
 | 设计点 | 实现方式 |
 |--------|----------|
-| **依赖倒置** | Service 层依赖 `ports` 接口，不依赖具体实现 |
+| **依赖倒置** | 应用层依赖 `ports` 接口，不依赖具体实现 |
 | **双表存储** | 草稿表 + 已发布表，分离读写路径 |
 | **装饰器模式** | `cachedPublishedPostRepository` 透明增加缓存 |
 | **事务保证** | 发布/删除操作使用数据库事务 |
-| **权限校验** | Handler 层验证 authorId |
+| **权限校验** | Web Adapter 层验证 authorId |
 | **可测试性** | 通过接口 Mock 实现纯单元测试 |
 
 **下一步可扩展：**

@@ -2,7 +2,7 @@ package ioc
 
 import (
 	"webook/config"
-	"webook/internal/repository/dao"
+	dao "webook/internal/adapters/outbound/persistence/mysql"
 
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
@@ -15,7 +15,14 @@ func NewDB(cfg *config.Config) *gorm.DB {
 		panic(err)
 	}
 	// 自动迁移数据库表结构
-	err = db.AutoMigrate(&dao.User{}, &dao.Post{}, &dao.PublishedPost{})
+	err = db.AutoMigrate(
+		&dao.User{},
+		&dao.Post{},
+		&dao.PublishedPost{},
+		&dao.PostStats{},
+		&dao.PostLikeRelation{},
+		&dao.PostCollectRelation{},
+	)
 	if err != nil {
 		panic(err)
 	}
